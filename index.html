@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Research Agent Pro</title>
+<script>
+// A single blocking <script src> has no recovery path if that one CDN is
+// slow, blocked by a network policy/ad-blocker, or transiently down - which
+// is exactly what produced "docx library failed to load" for some users
+// even though the URL itself is valid. This loads xlsx.js and docx.js
+// dynamically with an independently-hosted fallback per library (verified
+// working: jsdelivr mirrors both npm packages) and a real timeout on each
+// attempt, and exposes a promise per library that the app awaits up front -
+// so a load failure is caught in ~9s with a clear message, instead of
+// silently surfacing only after the user has waited through the whole
+// analysis pipeline. Neither call blocks page rendering.
+function __loadScript(url,timeoutMs){
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    let done=false;
+    const t=setTimeout(()=>{if(!done){done=true;s.remove();reject(new Error('timed out loading '+url));}},timeoutMs);
+    s.src=url;
+    s.onload=()=>{if(!done){done=true;clearTimeout(t);resolve();}};
+    s.onerror=()=>{if(!done){done=true;clearTimeout(t);s.remove();reject(new Error('failed to load '+url));}};
+    document.head.appendChild(s);
+  });
+}
+async function __loadWithFallback(urls,timeoutMs){
+  let lastErr;
+  for(const url of urls){
+    try{ await __loadScript(url,timeoutMs); return url; }
+    catch(e){ lastErr=e; }
+  }
+  throw lastErr||new Error('all sources failed');
+}
+window.__xlsxReady=__loadWithFallback([
+  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+  'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+],9000);
+window.__docxReady=__loadWithFallback([
+  'https://unpkg.com/docx@8.5.0/build/index.umd.js',
+  'https://cdn.jsdelivr.net/npm/docx@8.5/build/index.umd.min.js',
+],9000);
+</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
+:root{
+  --navy:#0f2444;--blue:#1a3c6e;--accent:#2563eb;--light:#e8f0fb;
+  --green:#15803d;--lgreen:#dcfce7;--red:#b91c1c;--lred:#fee2e2;
+  --amber:#b45309;--lamber:#fef3c7;--gray:#f8f9fa;--border:#e2e8f0;
+  --text:#0f172a;--muted:#64748b;--white:#ffffff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-height:100vh}
+.topbar{background:var(--navy);padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+.topbar-title{font-family:'DM Serif Display',serif;font-size:1.5rem;color:#fff}
+.topbar-title span{color:#60a5fa}
+.topbar-title .pro-tag{font-size:.68rem;font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.08em;color:var(--navy);background:#60a5fa;padding:2px 7px;border-radius:5px;vertical-align:middle;margin-left:4px}
+.topbar-sub{font-size:.78rem;color:#93c5fd;margin-top:2px}
+.topbar-badge{margin-left:auto;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#bfdbfe;font-size:.72rem;padding:4px 12px;border-radius:20px}
+.page{max-width:1060px;margin:0 auto;padding:1.75rem 1.25rem}
+/* steps */
+.steps{display:flex;background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:1.5rem}
+.step{flex:1;padding:.875rem 1rem;display:flex;align-items:center;gap:.6rem;border-right:1px solid var(--border);opacity:.35;transition:opacity .3s}
+.step:last-child{border-right:none}
+.step.active{opacity:1}
+.step.done{opacity:.65}
+.step-num{width:26px;height:26px;border-radius:50%;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:600;flex-shrink:0;transition:background .3s,color .3s}
+.step.active .step-num{background:var(--accent);color:#fff}
+.step.done .step-num{background:var(--green);color:#fff}
+.step-lbl{font-size:.78rem;font-weight:500}
+.step-sub{font-size:.7rem;color:var(--muted);margin-top:1px}
+/* card */
+.card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:1.75rem;margin-bottom:1.25rem}
+.card-title{font-family:'DM Serif Display',serif;font-size:1.15rem;color:var(--navy);margin-bottom:.25rem}
+.card-sub{font-size:.8rem;color:var(--muted);margin-bottom:1.25rem}
+/* upload */
+.upload-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.875rem;margin-bottom:1rem}
+.drop-zone{border:2px dashed var(--border);border-radius:10px;padding:1.25rem;text-align:center;cursor:pointer;transition:all .2s;position:relative;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.drop-zone:hover,.drop-zone.dragover{border-color:var(--accent);background:#f0f7ff}
+.drop-zone.ready{border-color:var(--green);border-style:solid;background:var(--lgreen)}
+.drop-zone.mandatory{border-color:#f59e0b}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dz-icon{font-size:1.4rem;margin-bottom:.4rem}
+.dz-lbl{font-size:.78rem;font-weight:600}
+.dz-hint{font-size:.69rem;color:var(--muted);margin-top:2px}
+.dz-file{font-size:.69rem;color:var(--green);font-weight:500;margin-top:4px;word-break:break-all;max-width:100%}
+/* sector */
+.sector-row{margin-top:1.1rem}
+.sector-row label{font-size:.78rem;font-weight:600;display:block;margin-bottom:.45rem}
+.sector-row select{width:100%;padding:.7rem .85rem;border:1px solid var(--border);border-radius:8px;font-size:.82rem;font-family:'DM Sans',sans-serif;outline:none;background:#fff;cursor:pointer;color:var(--text)}
+.sector-row select:focus{border-color:var(--accent)}
+.sector-hint{font-size:.7rem;color:var(--muted);margin-top:5px;line-height:1.5}
+/* peers */
+.peers-wrap{margin-top:1.1rem}
+.peers-lbl{font-size:.78rem;font-weight:600;margin-bottom:.65rem}
+.peers-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem}
+.peer-group label{font-size:.69rem;color:var(--muted);display:block;margin-bottom:3px}
+.peer-group input{width:100%;padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:.78rem;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s}
+.peer-group input:focus{border-color:var(--accent)}
+/* buttons */
+.gen-btn{width:100%;padding:.875rem;background:var(--navy);color:#fff;border:none;border-radius:9px;font-size:.9rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:1.25rem;transition:background .2s;display:flex;align-items:center;justify-content:center;gap:.5rem}
+.gen-btn:hover{background:var(--blue)}
+.gen-btn:disabled{background:var(--muted);cursor:not-allowed}
+.dl-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.7rem 1.5rem;background:var(--green);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:.875rem;font-weight:600;font-family:'DM Sans',sans-serif;margin-top:1.25rem;transition:background .2s}
+.dl-btn:hover{background:#166534}
+.reset-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.7rem 1.1rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:.82rem;font-family:'DM Sans',sans-serif;margin-top:1.25rem;margin-left:.65rem;transition:all .2s}
+.reset-btn:hover{background:var(--gray);color:var(--text)}
+/* error */
+.err{background:var(--lred);border:1px solid #fca5a5;color:#7f1d1d;padding:.875rem 1rem;border-radius:8px;font-size:.82rem;margin-top:.875rem;display:none}
+/* progress */
+.prog-title{font-size:.875rem;font-weight:600;color:var(--navy);margin-bottom:.875rem}
+.pbar-wrap{height:5px;background:var(--border);border-radius:3px;margin-bottom:.65rem;overflow:hidden}
+.pbar{height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width .35s ease}
+.plog{font-size:.75rem;color:var(--muted);line-height:1.9}
+.plog-line{display:flex;align-items:center;gap:.4rem}
+.plog-line.done{color:var(--green)}
+.plog-line.cur{color:var(--accent);font-weight:500}
+/* results */
+.sec-label{font-family:'DM Serif Display',serif;font-size:.975rem;color:var(--navy);margin:1.4rem 0 .65rem;padding-bottom:.35rem;border-bottom:2px solid var(--light)}
+.scores-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem;margin:.75rem 0}
+.score-box{background:var(--gray);border-radius:8px;padding:.7rem;text-align:center}
+.score-name{font-size:.67rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+.score-val{font-size:1.3rem;font-weight:600}
+.score-bar-wrap{height:3px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden}
+.score-bar{height:100%;border-radius:2px}
+.ratings-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem;margin:.75rem 0}
+.rat-box{border-radius:10px;padding:.875rem;text-align:center;border:1px solid var(--border)}
+.rat-h{font-size:.67rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:3px}
+.rat-call{font-size:.95rem;font-weight:700;margin-bottom:3px}
+.rat-tgt{font-size:.73rem;color:var(--muted)}
+.dtable{width:100%;border-collapse:collapse;font-size:.78rem;margin:.65rem 0}
+.dtable th{background:var(--navy);color:#fff;padding:7px 9px;text-align:left;font-weight:500}
+.dtable td{padding:6px 9px;border-bottom:1px solid var(--border)}
+.dtable tr:nth-child(even) td{background:var(--gray)}
+.dtable td:first-child{font-weight:500}
+.dtable td:not(:first-child){text-align:right}
+.dtable-wrap{overflow-x:auto}
+.pos-neg{display:grid;grid-template-columns:1fr 1fr;gap:.875rem;margin:.75rem 0}
+.pn-item{font-size:.78rem;padding:.55rem .7rem;border-radius:7px;line-height:1.5}
+.pn-item strong{display:block;margin-bottom:1px;font-size:.73rem}
+.p-item{background:var(--lgreen);color:#14532d}
+.n-item{background:var(--lred);color:#7f1d1d}
+.val-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.65rem;margin:.65rem 0}
+.val-box{background:var(--gray);border-radius:8px;padding:.8rem}
+.val-method{font-size:.67rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:5px}
+.val-bull{font-size:.78rem;color:var(--green);margin-bottom:2px}
+.val-base{font-size:.78rem;color:var(--blue);margin-bottom:2px}
+.val-bear{font-size:.78rem;color:var(--red)}
+.val-note{font-size:.67rem;color:var(--muted);margin-top:5px}
+.tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:500;margin:2px}
+.tag-g{background:var(--lgreen);color:#14532d}
+.tag-r{background:var(--lred);color:#7f1d1d}
+.tag-a{background:var(--lamber);color:#78350f}
+.company-banner{background:var(--navy);border-radius:10px;padding:1.35rem 1.5rem;margin-bottom:1.25rem;color:#fff}
+.cb-name{font-family:'DM Serif Display',serif;font-size:1.4rem}
+.cb-meta{font-size:.78rem;color:#93c5fd;margin-top:4px}
+/* NEW: bank warning */
+.warn-box{background:var(--lamber);border:1px solid #fbbf24;color:#78350f;padding:.85rem 1rem;border-radius:8px;font-size:.8rem;margin-bottom:1.1rem;line-height:1.55}
+/* NEW: 3-stage filter */
+.filter-funnel{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin:.75rem 0}
+.filter-stage{border-radius:10px;padding:1rem;border:1.5px solid var(--border);background:var(--gray)}
+.filter-stage.pass{border-color:var(--green);background:var(--lgreen)}
+.filter-stage.fail{border-color:var(--red);background:var(--lred)}
+.filter-stage.na{border-color:var(--border);background:var(--gray)}
+.fs-icon{font-size:1.15rem;margin-bottom:.3rem;font-weight:700}
+.fs-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+.fs-verdict{font-size:.95rem;font-weight:700;margin:.2rem 0 .4rem}
+.fs-detail{font-size:.69rem;color:var(--muted);line-height:1.6}
+.filter-overall{text-align:center;font-size:.83rem;font-weight:600;padding:.7rem;border-radius:8px;background:var(--light);color:var(--navy);margin-top:.6rem}
+/* NEW: distress diagnostics */
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.875rem;margin:.75rem 0}
+.diag-box{border-radius:10px;padding:1.1rem;border:1px solid var(--border);background:var(--gray);border-left-width:4px}
+.diag-box.zone-safe{border-left-color:var(--green)}
+.diag-box.zone-grey{border-left-color:var(--amber)}
+.diag-box.zone-distress{border-left-color:var(--red)}
+.diag-name{font-size:.7rem;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.03em}
+.diag-val{font-size:1.55rem;font-weight:700;color:var(--navy);margin:.3rem 0}
+.diag-zone{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.7rem;font-weight:600}
+.diag-comp{font-size:.7rem;color:var(--muted);margin-top:.6rem;line-height:1.7}
+.diag-note{font-size:.68rem;color:var(--muted);font-style:italic;margin-top:.55rem;border-top:1px dashed var(--border);padding-top:.45rem;line-height:1.5}
+/* NEW: dupont chain */
+.dupont-chain{display:flex;align-items:stretch;flex-wrap:wrap;gap:.4rem;margin:.9rem 0;font-size:.78rem}
+.dp-box{background:var(--gray);border:1px solid var(--border);border-radius:8px;padding:.6rem .5rem;text-align:center;flex:1;min-width:96px}
+.dp-name{font-size:.63rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;line-height:1.3}
+.dp-val{font-size:1rem;font-weight:700;color:var(--navy)}
+.dp-op{font-size:1.1rem;color:var(--muted);font-weight:300;display:flex;align-items:center;padding:0 .1rem}
+.dp-eq{background:var(--navy);color:#fff;border-radius:8px;padding:.6rem .5rem;text-align:center;flex:1;min-width:96px}
+.dp-flag{margin-top:.65rem;padding:.7rem .85rem;border-radius:8px;font-size:.78rem;line-height:1.55}
+.dp-flag.warn{background:var(--lred);color:#7f1d1d}
+.dp-flag.ok{background:var(--lgreen);color:#14532d}
+/* NEW: sector thesis */
+.thesis-card{background:var(--gray);border-radius:10px;padding:1.15rem 1.3rem;margin:.75rem 0}
+.thesis-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;margin-bottom:.85rem}
+.thesis-col h5{font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;margin-bottom:.5rem}
+.thesis-col.cat h5{color:var(--green)}
+.thesis-col.risk h5{color:var(--red)}
+.thesis-col ul{padding-left:1.05rem}
+.thesis-col li{font-size:.78rem;line-height:1.6;margin-bottom:.35rem;color:var(--text)}
+.thesis-focus{font-size:.78rem;background:#fff;border-left:3px solid var(--accent);padding:.7rem .85rem;border-radius:0 6px 6px 0;line-height:1.6}
+@media(max-width:700px){
+  .upload-row,.peers-grid,.scores-grid,.ratings-strip,.pos-neg,.val-grid,.filter-funnel,.diag-grid,.thesis-grid{grid-template-columns:1fr 1fr}
+  .steps{flex-direction:column}
+  .step{border-right:none;border-bottom:1px solid var(--border)}
+}
+@media(max-width:480px){
+  .upload-row,.pos-neg,.filter-funnel,.thesis-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="topbar-title">Stock<span>Research</span> Agent<span class="pro-tag">PRO</span></div>
+    <div class="topbar-sub">screener.in Excel → 8-Dimension Score + Altman Z · Ohlson O · DuPont · Graham → Full report</div>
+  </div>
+  <div class="topbar-badge">No API · No Server · 100% Local</div>
+</div>
+
+<div class="page">
+
+  <div class="steps" id="steps">
+    <div class="step active" id="step1">
+      <div class="step-num">1</div>
+      <div><div class="step-lbl">Upload Excel</div><div class="step-sub">screener.in export</div></div>
+    </div>
+    <div class="step" id="step2">
+      <div class="step-num">2</div>
+      <div><div class="step-lbl">Analysing</div><div class="step-sub">Scoring + risk models</div></div>
+    </div>
+    <div class="step" id="step3">
+      <div class="step-num">3</div>
+      <div><div class="step-lbl">Download</div><div class="step-sub">Word report ready</div></div>
+    </div>
+  </div>
+
+  <!-- UPLOAD -->
+  <div class="card" id="upload-card">
+    <div class="card-title">Upload Your Files</div>
+    <div class="card-sub">Download the Excel from screener.in → search company → scroll down → "Export to Excel". PDFs and sector are optional.</div>
+
+    <div class="upload-row">
+      <div class="drop-zone mandatory" id="dz-xlsx">
+        <input type="file" accept=".xlsx,.xls" id="f-xlsx" onchange="onFile('xlsx',this)">
+        <div class="dz-icon">📊</div>
+        <div class="dz-lbl">screener.in Excel</div>
+        <div class="dz-hint">Mandatory · .xlsx</div>
+        <div class="dz-file" id="fn-xlsx"></div>
+      </div>
+      <div class="drop-zone" id="dz-pdf1">
+        <input type="file" accept=".pdf" id="f-pdf1" onchange="onFile('pdf1',this)">
+        <div class="dz-icon">📄</div>
+        <div class="dz-lbl">Annual Report PDF</div>
+        <div class="dz-hint">Optional</div>
+        <div class="dz-file" id="fn-pdf1"></div>
+      </div>
+      <div class="drop-zone" id="dz-pdf2">
+        <input type="file" accept=".pdf" id="f-pdf2" onchange="onFile('pdf2',this)">
+        <div class="dz-icon">🎤</div>
+        <div class="dz-lbl">Earnings Transcript</div>
+        <div class="dz-hint">Optional</div>
+        <div class="dz-file" id="fn-pdf2"></div>
+      </div>
+    </div>
+
+    <div class="sector-row">
+      <label>Sector (optional — sharpens which risk models apply &amp; unlocks sectoral thesis alignment)</label>
+      <select id="sector-select">
+        <option value="general">General / Diversified (default — Z''-Score, all models equal weight)</option>
+        <option value="banking">Banking &amp; Financial Services</option>
+        <option value="renewable">Renewable Energy, Power &amp; Infrastructure</option>
+        <option value="manufacturing">Manufacturing, Electronics &amp; Semiconductors</option>
+        <option value="healthcare">Healthcare &amp; Pharmaceuticals</option>
+        <option value="consumption">Consumption, Retail &amp; Digital Tech</option>
+      </select>
+      <div class="sector-hint">Leave on General if unsure — the tool still runs the full analysis, it just won't tailor the distress model or show sector catalysts/risks.</div>
+    </div>
+
+    <div class="peers-wrap">
+      <div class="peers-lbl">Competitors (optional — enter name and key metrics for peer table)</div>
+      <div class="peers-grid">
+        <div class="peer-group"><label>Peer 1 Name</label><input type="text" id="p1n" placeholder="e.g. Kellton Tech"></div>
+        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p1d" placeholder="72x · 8% · 7%"></div>
+        <div class="peer-group"><label>Peer 2 Name</label><input type="text" id="p2n" placeholder="e.g. Mindteck"></div>
+        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p2d" placeholder="18x · 11% · 9%"></div>
+        <div class="peer-group"><label>Peer 3 Name</label><input type="text" id="p3n" placeholder="e.g. Redington India"></div>
+        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p3d" placeholder="18x · 20% · 2%"></div>
+        <div class="peer-group"><label>Peer 4 Name</label><input type="text" id="p4n" placeholder="e.g. Rashi Peripherals"></div>
+        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p4d" placeholder="21x · 19% · 2%"></div>
+      </div>
+    </div>
+
+    <div class="err" id="err-box"></div>
+    <button class="gen-btn" id="gen-btn" onclick="generate()" disabled>⚡ Generate Research Report</button>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="card" id="prog-card" style="display:none">
+    <div class="prog-title">Analysing your stock...</div>
+    <div class="pbar-wrap"><div class="pbar" id="pbar"></div></div>
+    <div class="plog" id="plog"></div>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="card" id="res-card" style="display:none">
+    <div id="res-content"></div>
+    <div>
+      <button class="dl-btn" id="dl-btn">⬇ Download Word Report (.docx)</button>
+      <button class="reset-btn" onclick="doReset()">↩ Analyse Another Stock</button>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let files={xlsx:null,pdf1:null,pdf2:null};
+let docxBlob=null;
+let logLines=[];
+
+function onFile(type,inp){
+  const f=inp.files[0]; if(!f)return;
+  files[type]=f;
+  document.getElementById('dz-'+type).classList.add('ready');
+  document.getElementById('dz-'+type).classList.remove('mandatory');
+  document.getElementById('fn-'+type).textContent=f.name;
+  if(type==='xlsx'){
+    document.getElementById('gen-btn').disabled=false;
+  }
+}
+
+// ─── Excel Parser ─────────────────────────────────────────────────────────────
+function parseExcel(arrayBuf){
+  const wb=XLSX.read(arrayBuf,{type:'array',cellDates:false,raw:true});
+  if(!wb.SheetNames.includes('Data Sheet'))
+    throw new Error('"Data Sheet" tab not found. Please use the screener.in Excel export (not a custom file).');
+  const ws=wb.Sheets['Data Sheet'];
+
+  // Read any cell by 1-based row, col
+  function cv(r,c){
+    const a=XLSX.utils.encode_cell({r:r-1,c:c-1});
+    return ws[a]?ws[a].v:null;
+  }
+  function num(v){
+    if(v===null||v===undefined)return null;
+    const n=parseFloat(v);
+    return isNaN(n)?null:n;
+  }
+  // label text at (row, col=1) — used for verifying inferred rows below
+  function labelAt(r){
+    const v=cv(r,1);
+    return v?String(v).trim().toLowerCase():'';
+  }
+
+  // Excel serial date → "Mar 2025"
+  function fmtSerial(v){
+    if(!v)return '';
+    let d;
+    if(typeof v==='number'){
+      // Excel date serial (days since 1900-01-01, with Lotus bug at day 60)
+      const ms=(v-25569)*86400*1000;
+      d=new Date(ms);
+    } else {
+      d=new Date(v);
+    }
+    if(isNaN(d.getTime()))return String(v);
+    return d.toLocaleDateString('en-IN',{month:'short',year:'numeric'});
+  }
+
+  // META (fixed positions)
+  const companyName=cv(1,2)||'Company';
+  const faceValue=num(cv(7,2));
+  const cmp=num(cv(8,2));
+  const mktCap=num(cv(9,2));
+  const sharesCr=cmp&&mktCap?parseFloat((mktCap/cmp).toFixed(2)):null;
+
+  // Bank/NBFC heuristic: screener labels row 17 "Interest Earned"/"Interest Income" instead of "Sales" for financials
+  const salesLabel=labelAt(17);
+  const looksLikeBank=salesLabel.includes('interest earned')||salesLabel.includes('interest income')||
+    (salesLabel.includes('interest')&&!salesLabel.includes('sales'));
+
+  // ── ANNUAL: scan row 16 cols 2–11 for dates ────────────────────────────────
+  const annCols=[];
+  for(let c=2;c<=11;c++){
+    const v=cv(16,c);
+    if(v!==null&&v!==undefined&&v!==''){
+      const n=num(v);
+      if(n&&n>40000) annCols.push(c); // Excel date serials for 2010+ are >40000
+    }
+  }
+  if(annCols.length===0) throw new Error('Could not find annual date row. Ensure you exported from screener.in.');
+
+  const annYears=annCols.map(c=>fmtSerial(cv(16,c)));
+
+  function annRow(r){
+    return annCols.map(c=>num(cv(r,c)));
+  }
+
+  const annSales  =annRow(17);
+  const annRawMat =annRow(18);
+  const annInvent =annRow(19);
+  const annPower  =annRow(20);
+  const annMfg    =annRow(21);
+  const annEmp    =annRow(22);
+  const annSell   =annRow(23);
+  const annOthExp =annRow(24);
+  const annOthInc =annRow(25);
+  const annDepn   =annRow(26);
+  const annInt    =annRow(27);
+  const annPat    =annRow(30);
+
+  // NEW: Profit-before-tax & Tax — sit between Interest(27) and Net Profit(30).
+  // Position is verified against the row label (with a small-window fallback search)
+  // so a template shift in screener's export doesn't silently corrupt the new models.
+  let pbtRow=28, taxRow=29, advRowsVerified=true;
+  if(!(labelAt(28).includes('before tax')||labelAt(28).includes('pbt'))){
+    advRowsVerified=false;
+    for(let r=26;r<=30;r++){ if(labelAt(r).includes('before tax')){ pbtRow=r; break; } }
+  }
+  if(!(labelAt(29).includes('tax')&&!labelAt(29).includes('before'))){
+    advRowsVerified=false;
+    for(let r=27;r<=31;r++){ if(labelAt(r).includes('tax')&&!labelAt(r).includes('before')){ taxRow=r; break; } }
+  }
+  const annPbt=annRow(pbtRow);
+  const annTax=annRow(taxRow);
+  // EBIT per the mapping taxonomy: Operating Profit + Other Income − Depreciation
+  const annEbitPre=annCols.map((c,i)=>{
+    return null; // placeholder, real calc after annOpProfit exists below
+  });
+
+  const annOpProfit=annSales.map((s,i)=>{
+    if(!s)return null;
+    const costs=[annRawMat[i],annInvent[i],annPower[i],annMfg[i],annEmp[i],annSell[i],annOthExp[i]]
+      .reduce((a,v)=>a+(v||0),0);
+    return parseFloat((s-costs).toFixed(2));
+  });
+  const annOpm=annSales.map((s,i)=>s&&annOpProfit[i]!=null?parseFloat((annOpProfit[i]/s*100).toFixed(1)):null);
+  const annNpm=annSales.map((s,i)=>s&&annPat[i]!=null?parseFloat((annPat[i]/s*100).toFixed(1)):null);
+  const annEbit=annOpProfit.map((op,i)=>(op!=null&&annOthInc[i]!=null&&annDepn[i]!=null)?parseFloat((op+annOthInc[i]-annDepn[i]).toFixed(2)):null);
+
+  // Adjusted shares row 93 — same cols as annual
+  const adjShares=annCols.map(c=>num(cv(93,c)));
+  const annEps=annPat.map((pat,i)=>{
+    const sh=adjShares[i];
+    return (sh&&pat&&sh>0)?parseFloat((pat/sh).toFixed(2)):null;
+  });
+
+  // CAGR
+  function cagr(nv,ov,y){if(!nv||!ov||ov<=0)return null;return parseFloat(((Math.pow(nv/ov,1/y)-1)*100).toFixed(1));}
+  const lsales=annSales.filter(v=>v!=null);
+  const lpat=annPat.filter(v=>v!=null);
+  const salesCagr3=lsales.length>=4?cagr(lsales.at(-1),lsales.at(-4),3):null;
+  const salesCagr5=lsales.length>=6?cagr(lsales.at(-1),lsales.at(-6),5):null;
+  const patCagr3=lpat.length>=4?cagr(lpat.at(-1),lpat.at(-4),3):null;
+
+  // ── QUARTERLY: scan row 41 cols 1–11 for dates ────────────────────────────
+  const qCols=[];
+  for(let c=1;c<=11;c++){
+    const v=cv(41,c);
+    if(v!==null&&v!==undefined&&v!==''){
+      const n=num(v);
+      if(n&&n>40000) qCols.push(c);
+    }
+  }
+  const qPeriods=qCols.map(c=>fmtSerial(cv(41,c)));
+
+  function qRow(r){return qCols.map(c=>num(cv(r,c)));}
+  const qSales  =qRow(42);
+  const qExp    =qRow(43);
+  const qPat    =qRow(49);
+  const qOpProf =qRow(50);
+  const qOpm    =qSales.map((s,i)=>s&&qOpProf[i]!=null?parseFloat((qOpProf[i]/s*100).toFixed(1)):null);
+
+  const lastQSales=qSales.filter(v=>v!=null).at(-1);
+  const lastQPat=qPat.filter(v=>v!=null).at(-1);
+  const lastQOpm=qOpm.filter(v=>v!=null).at(-1);
+  const lastQLabel=qPeriods.at(-1)||'';
+  function yoyQ(arr){const c=arr.filter(v=>v!=null);if(c.length<5||!c.at(-5))return null;return parseFloat(((c.at(-1)/c.at(-5)-1)*100).toFixed(1));}
+  const yoyQSales=yoyQ(qSales);
+  const yoyQPat=yoyQ(qPat);
+
+  // ── BALANCE SHEET: scan row 56 cols 2–11 ─────────────────────────────────
+  const bsCols=[];
+  for(let c=2;c<=11;c++){
+    const v=cv(56,c);
+    if(v!==null&&v!==undefined&&v!==''){
+      const n=num(v);
+      if(n&&n>40000) bsCols.push(c);
+    }
+  }
+  const bsYears=bsCols.map(c=>fmtSerial(cv(56,c)));
+
+  function bsRow(r){return bsCols.map(c=>num(cv(r,c)));}
+  const bsEqCap=bsRow(57);
+  const bsRes  =bsRow(58);
+  const bsBorr =bsRow(59);
+  const bsTotal=bsRow(61);
+  const bsNetBlk=bsRow(62);
+  const bsRecv =bsRow(67);
+  const bsInv  =bsRow(68);
+  const bsCash =bsRow(69);
+
+  // NEW: Other Liabilities — sits between Borrowings(59) and Total(61); verified against label.
+  let othLiabRow=60;
+  if(!labelAt(60).includes('liabilit')){
+    for(let r=58;r<=62;r++){ if(labelAt(r).includes('other liabilit')){ othLiabRow=r; break; } }
+  }
+  const bsOthLiab=bsRow(othLiabRow);
+
+  const bsEquity=bsEqCap.map((e,i)=>parseFloat(((e||0)+(bsRes[i]||0)).toFixed(2)));
+  const bsDeR=bsEquity.map((eq,i)=>eq&&bsBorr[i]!=null?parseFloat((bsBorr[i]/eq).toFixed(2)):null);
+  const bsRoe=bsEquity.map((eq,i)=>{
+    const pat=i<annPat.length?annPat[i]:annPat.at(-1);
+    return eq&&pat?parseFloat((pat/eq*100).toFixed(1)):null;
+  });
+  const bsDdays=bsCols.map((_,i)=>{
+    const s=i<annSales.length?annSales[i]:null;
+    const r=bsRecv[i];
+    return s&&r&&s>0?parseFloat((r/(s/365)).toFixed(1)):null;
+  });
+
+  // NEW: Total = Total Assets = Total Liabilities+Equity (screener's single balance-sheet total row).
+  // Total Liabilities (ex-equity), Current Assets/Liabilities approximation, and Working Capital,
+  // per the mapping taxonomy. Current Liabilities is approximated by Other Liabilities since screener's
+  // simplified Data Sheet does not split current vs non-current — flagged to the user in the UI/report.
+  const bsTotalLiab=bsTotal.map((t,i)=>(t!=null&&bsEquity[i]!=null)?parseFloat((t-bsEquity[i]).toFixed(2)):null);
+  const bsCurrentAssets=bsRecv.map((r,i)=>{
+    const inv=bsInv[i], cash=bsCash[i];
+    if(r==null&&inv==null&&cash==null)return null;
+    return parseFloat(((r||0)+(inv||0)+(cash||0)).toFixed(2));
+  });
+  const bsCurrentLiab=bsOthLiab;
+  const bsWorkingCap=bsCurrentAssets.map((ca,i)=>(ca!=null&&bsCurrentLiab[i]!=null)?parseFloat((ca-bsCurrentLiab[i]).toFixed(2)):null);
+
+  // ── CASH FLOW: scan row 81 ───────────────────────────────────────────────
+  const cfCols=[];
+  for(let c=2;c<=11;c++){
+    const v=cv(81,c);
+    if(v!==null&&v!==undefined&&v!==''){
+      const n=num(v);
+      if(n&&n>40000) cfCols.push(c);
+    }
+  }
+  const cfYears=cfCols.map(c=>fmtSerial(cv(81,c)));
+  function cfRow(r){return cfCols.map(c=>num(cv(r,c)));}
+  const cfOps=cfRow(82);
+  const cfInv=cfRow(83);
+  const cfFin=cfRow(84);
+
+  const trailingPE=cmp&&annEps.filter(v=>v).at(-1)?parseFloat((cmp/annEps.filter(v=>v).at(-1)).toFixed(1)):null;
+  const trailingPS=mktCap&&lsales.at(-1)?parseFloat((mktCap/lsales.at(-1)).toFixed(2)):null;
+
+  return {
+    meta:{companyName,faceValue,cmp,mktCap,sharesCr,trailingPE,trailingPS,looksLikeBank,advRowsVerified},
+    annual:{years:annYears,sales:annSales,opProfit:annOpProfit,opm:annOpm,pat:annPat,
+      npm:annNpm,eps:annEps,depreciation:annDepn,interest:annInt,otherIncome:annOthInc,
+      salesCagr3,salesCagr5,patCagr3,pbt:annPbt,tax:annTax,ebit:annEbit},
+    quarterly:{periods:qPeriods,sales:qSales,opProfit:qOpProf,opm:qOpm,pat:qPat,
+      lastQLabel,lastQSales,lastQPat,lastQOpm,yoyQSales,yoyQPat},
+    balanceSheet:{years:bsYears,equity:bsEquity,borr:bsBorr,total:bsTotal,
+      cash:bsCash,recv:bsRecv,inventory:bsInv,netBlock:bsNetBlk,
+      roe:bsRoe,deRatio:bsDeR,ddays:bsDdays,reserves:bsRes,otherLiab:bsOthLiab,
+      totalLiab:bsTotalLiab,currentAssets:bsCurrentAssets,currentLiab:bsCurrentLiab,workingCap:bsWorkingCap},
+    cashFlow:{years:cfYears,ops:cfOps,investing:cfInv,financing:cfFin},
+  };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+// FIX: guard against undefined/non-array inputs so .filter() never throws
+const last=arr=>{
+  if(!Array.isArray(arr))return null;
+  const c=arr.filter(v=>v!=null);
+  return c.length?c.at(-1):null;
+};
+function trend(arr){
+  if(!Array.isArray(arr))return'stable';
+  const c=arr.filter(v=>v!=null);
+  if(c.length<3)return'stable';
+  if(c.at(-1)>c.at(-3)*1.05)return'improving';
+  if(c.at(-1)<c.at(-3)*0.95)return'declining';
+  return'stable';
+}
+
+// ─── Scoring Engine ───────────────────────────────────────────────────────────
+const safe=(v,d=0)=>v!=null?v:d;
+const sign=v=>v==null?'':(v>=0?'+':'');
+const fmtCr=v=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
+const fmtPct=v=>v==null?'—':v.toFixed(1)+'%';
+
+// FIX: use (arr||[]) before every direct .filter() call inside scoring fns
+function scoreGrowth(a,q){
+  let s=5,sc3=safe(a.salesCagr3),pc3=safe(a.patCagr3),sc5=safe(a.salesCagr5);
+  if(sc3>30)s+=2;else if(sc3>20)s+=1;else if(sc3<5)s-=2;else if(sc3<10)s-=1;
+  if(pc3>sc3)s+=1;
+  if(sc5>15)s+=1;else if(sc5<5)s-=1;
+  const qt=trend(q.sales);
+  if(qt==='improving')s+=1;
+  if(qt==='declining')s-=1;
+  return Math.max(0,Math.min(10,s));
+}
+function scoreMargins(a){
+  let s=5;
+  const opm=(a.opm||[]).filter(v=>v!=null),lo=opm.at(-1)||0;
+  if(lo>25)s+=3;else if(lo>18)s+=2;else if(lo>12)s+=1;else if(lo<5)s-=3;else if(lo<8)s-=1;
+  const t=trend(a.opm);
+  if(t==='improving')s+=1;
+  if(t==='declining')s-=1;
+  if(opm.length&&Math.min(...opm)>8)s+=1;
+  return Math.max(0,Math.min(10,s));
+}
+function scoreBS(bs){
+  let s=5;
+  const de=last(bs.deRatio),cash=last(bs.cash),borr=last(bs.borr);
+  if(de!=null){if(de<0.1)s+=3;else if(de<0.5)s+=2;else if(de<1)s+=1;else if(de>2)s-=3;else if(de>1.5)s-=2;else if(de>1)s-=1;}
+  if(cash&&borr&&cash>borr)s+=1;
+  return Math.max(0,Math.min(10,s));
+}
+function scoreCF(cf,a){
+  let s=5;
+  const ops=(cf.ops||[]).filter(v=>v!=null);
+  if(ops.length){if(ops.every(x=>x>0))s+=2;else if(ops.filter(x=>x<0).length>2)s-=2;}
+  const lc=last(cf.ops),lp=last(a.pat);
+  if(lc&&lp&&lp>0){const r=lc/lp;if(r>1)s+=2;else if(r>0.7)s+=1;else if(r<0.3)s-=2;}
+  const t=trend(cf.ops);
+  if(t==='improving')s+=1;
+  if(t==='declining')s-=1;
+  return Math.max(0,Math.min(10,s));
+}
+function scoreRet(bs){
+  let s=5;
+  const roe=(bs.roe||[]).filter(v=>v!=null),lr=roe.at(-1)||0;
+  if(lr>25)s+=3;else if(lr>18)s+=2;else if(lr>12)s+=1;else if(lr<5)s-=3;else if(lr<10)s-=1;
+  const t=trend(bs.roe);
+  if(t==='improving')s+=1;
+  if(t==='declining')s-=1;
+  return Math.max(0,Math.min(10,s));
+}
+function scoreWC(bs){
+  let s=5;
+  const dd=(bs.ddays||[]).filter(v=>v!=null),ld=dd.at(-1)||60;
+  if(ld<30)s+=2;else if(ld<50)s+=1;else if(ld>90)s-=2;else if(ld>70)s-=1;
+  if(dd.length>=3){if(dd.at(-1)>dd.at(-3)*1.1)s-=1;if(dd.at(-1)<dd.at(-3)*0.9)s+=1;}
+  return Math.max(0,Math.min(10,s));
+}
+function scoreVal(m,a){
+  let s=5,pe=safe(m.trailingPE),sc3=safe(a.salesCagr3);
+  if(pe>0&&sc3>0){const peg=pe/sc3;if(peg<0.5)s+=3;else if(peg<1)s+=2;else if(peg<1.5)s+=1;else if(peg>3)s-=3;else if(peg>2)s-=2;else if(peg>1.5)s-=1;}
+  else if(pe>60)s-=3;else if(pe>45)s-=2;else if(pe>30)s-=1;else if(pe<10)s+=2;else if(pe<15)s+=1;
+  return Math.max(0,Math.min(10,s));
+}
+function scoreCons(a){
+  let s=5;
+  const sales=(a.sales||[]).filter(v=>v!=null),pat=(a.pat||[]).filter(v=>v!=null);
+  const ns=sales.filter((v,i)=>i>0&&v<sales[i-1]).length;
+  const np=pat.filter((v,i)=>i>0&&v<pat[i-1]).length;
+  if(ns===0)s+=2;else s-=ns;
+  if(np===0)s+=2;else s-=np;
+  return Math.max(0,Math.min(10,s));
+}
+
+function deriveRatings(sc,m,a){
+  const comp=Object.values(sc).reduce((a,v)=>a+v,0)/Object.keys(sc).length;
+  const near=sc.valuation*0.5+comp*0.5;
+  const lng=sc.growth*0.35+sc.returns*0.25+sc.margins*0.2+sc.cashflow*0.2;
+  function rat(v,adj=0){v+=adj;if(v>=8.5)return'STRONG BUY';if(v>=7)return'BUY';if(v>=5.5)return'HOLD';if(v>=4)return'SELL / AVOID';return'STRONG SELL';}
+  return{composite:parseFloat(comp.toFixed(1)),r6m:rat(near),r1y:rat((near+lng)/2),r3y:rat(lng),r5y:rat(lng,0.5)};
+}
+
+function buildVal(m,a,bs){
+  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),mcap=safe(m.mktCap,0),sc3=safe(a.salesCagr3,10);
+  const leps=last(a.eps)||(pe?cmp/pe:0);
+  const gBase=Math.min(sc3*0.75,40),gBull=Math.min(sc3,50),gBear=Math.max(sc3*0.4,5);
+  const epsFY2Base=leps?parseFloat((leps*(1+gBase/100)**2).toFixed(1)):null;
+  const epsFY2Bull=leps?parseFloat((leps*(1+gBull/100)**2).toFixed(1)):null;
+  const epsFY2Bear=leps?parseFloat((leps*(1+gBear/100)**2).toFixed(1)):null;
+  const peB=Math.round(pe*0.9),peBull=Math.round(pe*1.1),peBear=Math.round(pe*0.65);
+  const tp=(e,mult)=>e?Math.round(e*mult):null;
+  const lDepn=last(a.depreciation)||0,lOp=last(a.opProfit)||0,ebitda=lOp+lDepn;
+  const ebitdaFY2=ebitda*(1+gBase/100)**2;
+  const borr=last(bs.borr)||0,cash=last(bs.cash)||0,netDebt=borr-cash,sh=safe(m.sharesCr,1);
+  const evBase=(mcap+netDebt),evMult=ebitda?parseFloat((evBase/ebitda).toFixed(1)):15;
+  const evBull=Math.round(evMult*1.15),evBase2=Math.round(evMult*0.95),evBear=Math.round(evMult*0.70);
+  const evTp=mult=>{const ev=ebitdaFY2*mult;const eq=ev-netDebt;return sh&&eq>0?Math.round(eq/sh):null;};
+  const dcf={};
+  for(const[nm,g]of[['bull',gBull],['base',gBase],['bear',gBear]]){
+    let fcf=last(a.pat)||0,pv=0;
+    for(let yr=1;yr<=5;yr++){fcf*=(1+g/100);pv+=fcf/(1.12**yr);}
+    const tv=fcf*1.04/0.08,tvpv=tv/(1.12**5);
+    dcf[nm]=sh?Math.round((pv+tvpv-netDebt)/sh):null;
+  }
+  const f=v=>v?'₹'+v.toLocaleString('en-IN'):'—';
+  return{
+    pe:{bull:`${f(tp(epsFY2Bull,peBull))} (${peBull}x)`,base:`${f(tp(epsFY2Base,peB))} (${peB}x)`,bear:`${f(tp(epsFY2Bear,peBear))} (${peBear}x)`,note:`FY+2E EPS — Bull ₹${epsFY2Bull}, Base ₹${epsFY2Base}, Bear ₹${epsFY2Bear}`},
+    ev:{bull:f(evTp(evBull)),base:f(evTp(evBase2)),bear:f(evTp(evBear)),note:`Current EV/EBITDA ~${evMult}x`},
+    dcf:{bull:f(dcf.bull),base:f(dcf.base),bear:f(dcf.bear),note:'12% WACC, 4% terminal growth, 5Y explicit'},
+    epsFY2Base,peBase:peB,
+  };
+}
+
+function buildStrategy(rat,m,a){
+  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),sc3=safe(a.salesCagr3,10);
+  function mults(r,h){
+    if(r.includes('STRONG BUY'))return{6:[0.98,1.18],12:[1.10,1.40],36:[1.60,2.40],60:[2.20,3.50]}[h];
+    if(r.includes('BUY'))       return{6:[0.95,1.12],12:[1.05,1.28],36:[1.40,2.00],60:[1.80,2.80]}[h];
+    if(r.includes('HOLD'))      return{6:[0.90,1.05],12:[0.95,1.15],36:[1.10,1.60],60:[1.40,2.20]}[h];
+    return                             {6:[0.72,0.90],12:[0.80,1.00],36:[0.90,1.30],60:[1.10,1.80]}[h];
+  }
+  function makeEntry(lbl,months,rating){
+    const[ml,mh]=mults(rating,months);
+    const tl=Math.round(cmp*ml),th=Math.round(cmp*mh);
+    const ul=Math.round((tl/cmp-1)*100),uh=Math.round((th/cmp-1)*100);
+    return{label:lbl,rating,target:`₹${tl.toLocaleString('en-IN')}–${th.toLocaleString('en-IN')}`,upside:`${sign(ul)}${ul}% to ${sign(uh)}${uh}%`};
+  }
+  return[makeEntry('6 Months',6,rat.r6m),makeEntry('1 Year',12,rat.r1y),makeEntry('3 Years',36,rat.r3y),makeEntry('5 Years',60,rat.r5y)];
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// NEW: Advanced Quantitative Diagnostics — Altman Z / Z'', Ohlson O, DuPont-5,
+// Graham Number, sectoral thesis alignment, and the 3-stage institutional filter.
+// Each function fails soft (applicable:false + a plain-English note) rather than
+// throwing, since these models need balance-sheet fields whose exact row position
+// on screener.in's Data Sheet is inferred (see parseExcel) rather than guaranteed.
+// ══════════════════════════════════════════════════════════════════════════
+
+const SECTOR_INFO={
+  general:{label:'General / Diversified',zMode:'z2',catalysts:[],risks:[],
+    quantFocus:"No sector tilt applied — the Z''-Score (emerging-market variant), Ohlson O-Score, DuPont and Graham Number are all shown at equal weight."},
+  banking:{label:'Banking & Financial Services',zMode:'skip',
+    catalysts:['Rising credit penetration into tier-2/tier-3 cities','Household savings shifting from physical assets (gold, real estate) into financial products','Digital lending scaling on India\u2019s Digital Public Infrastructure (DPI)','Insurance growth aided by rising awareness and schemes like Ayushman Bharat'],
+    risks:['Net interest margins can compress if deposit repricing outpaces loan-yield increases','Aggressive unsecured retail-lending growth is a tail risk if the macro backdrop weakens'],
+    quantFocus:"Z-Score models are unreliable for financials because off-balance-sheet items make the balance sheet opaque, so they're skipped for this sector. Lean on the 5-step DuPont decomposition (Operating Margin acts as a Net Interest Margin proxy) and check asset-quality/NPA trends separately — the Equity Multiplier check in the 3-stage filter is also waived here since leverage is structural to banking."},
+  renewable:{label:'Renewable Energy, Power & Infrastructure',zMode:'z2',
+    catalysts:['India targets 450 GW of renewable capacity by 2030','Heavy capex from large domestic conglomerates (utilities, power, industrials)','Localisation of solar-module manufacturing','Build-out of EV charging infrastructure'],
+    risks:['Substantial project debt is typical during the construction/capex phase','Many green-energy names trade well above book value on growth optimism'],
+    quantFocus:"The Z\u2019\u2019-Score (Emerging Market) is the key screen here — it isolates over-leverage risk during a heavy capex cycle. Cross-check the Graham Number so you don't overpay for long-duration infrastructure assets."},
+  manufacturing:{label:'Manufacturing, Electronics & Semiconductors',zMode:'z',
+    catalysts:['"China Plus One" supply-chain realignment and "Make in India"','PLI scheme disbursements scaling up, with electronics-component incentives raised in the latest Union Budget','Rising FDI into domestic fabrication and assembly capacity'],
+    risks:['New capacity initially depresses ROA via depreciation and capital blockage before ramp-up'],
+    quantFocus:"The original (public-manufacturing) Z-Score is the best-fit model for this sector. Watch the X5 (Asset Turnover) sub-score specifically — a sequentially rising figure is the earliest sign that new capacity is converting into revenue rather than sitting idle."},
+  healthcare:{label:'Healthcare & Pharmaceuticals',zMode:'z2',
+    catalysts:['India supplies a large share of the world\u2019s generic pharmaceuticals and a majority of global vaccine doses','A high concentration of USFDA-approved manufacturing plants outside the US','Patent cliffs in Western markets opening up biosimilar opportunities'],
+    risks:['Regulatory shocks — a USFDA warning letter or import alert — can halt export revenue with little warning'],
+    quantFocus:"The Ohlson O-Score is emphasised here: its \u0394NI (change in net income) and working-capital terms react faster to a sudden regulatory-driven earnings shock than the slower-moving Z-Score."},
+  consumption:{label:'Consumption, Retail & Digital Tech',zMode:'z2',
+    catalysts:['Structural premiumisation as per-capita income rises','A large youth demographic dividend and rising rural smartphone/internet penetration','AI-driven operating leverage for IT-services exporters'],
+    risks:['Rural volume recovery has historically been uneven — premiumisation gains are not universal across the basket'],
+    quantFocus:"3-step DuPont works well for FMCG/retail names (stable margins from brand pricing power, high asset turnover). For asset-light IT/digital names, weight the Graham Number down — it doesn\u2019t capture intangible value (brand, software, patents) and the thesis flags it as of limited use for this cohort — and look at FCF/ROIC instead."},
+};
+
+function calcAltmanZ(sector,a,bs,m){
+  const zMode=(SECTOR_INFO[sector]||SECTOR_INFO.general).zMode;
+  if(zMode==='skip')
+    return{applicable:false,skipped:true,note:"Z-Score models are not reliable for banks/NBFCs — their balance-sheet structure (deposits, advances, provisioning) doesn't map to the ratios below, and they carry structurally high leverage by design. Skipped for this sector."};
+
+  const ta=last(bs.total),eq=last(bs.equity),tl=last(bs.totalLiab),wc=last(bs.workingCap),re=last(bs.reserves),ebit=last(a.ebit),sales=last(a.sales);
+  if(ta==null||ta<=0||eq==null||tl==null)
+    return{applicable:false,note:'Total Assets / Total Liabilities could not be reliably located on the Data Sheet for this export, so the Z-Score cannot be computed.'};
+
+  const X1=wc!=null?wc/ta:0, X2=re!=null?re/ta:0, X3=ebit!=null?ebit/ta:0;
+  let model,value,X4,X5=null,zoneThresholds;
+  if(zMode==='z'){
+    X4=(m.mktCap!=null&&tl>0)?m.mktCap/tl:0;
+    X5=(sales!=null&&ta>0)?sales/ta:0;
+    value=1.2*X1+1.4*X2+3.3*X3+0.6*X4+1.0*X5;
+    model='Altman Z-Score (Public Manufacturing)';
+    zoneThresholds={safe:2.99,distress:1.81};
+  } else {
+    X4=(eq!=null&&tl>0)?eq/tl:0;
+    value=3.25+6.56*X1+3.26*X2+6.72*X3+1.05*X4;
+    model="Altman Z''-Score (Emerging Market)";
+    zoneThresholds={safe:2.90,distress:1.23};
+  }
+  value=parseFloat(value.toFixed(2));
+  const zone=value>zoneThresholds.safe?'Safe':(value<zoneThresholds.distress?'Distress':'Grey');
+  return{applicable:true,model,value,zone,zoneThresholds,
+    components:{X1:X1.toFixed(2),X2:X2.toFixed(2),X3:X3.toFixed(2),X4:X4.toFixed(2),X5:X5!=null?X5.toFixed(2):null}};
+}
+
+function calcOhlsonO(a,bs){
+  const ta=last(bs.total),tl=last(bs.totalLiab),wc=last(bs.workingCap),ca=last(bs.currentAssets),cl=last(bs.currentLiab);
+  const ni=last(a.pat),pbt=last(a.pbt),depn=last(a.depreciation);
+  const pats=(a.pat||[]).filter(v=>v!=null);
+  if(ta==null||ta<=0||ni==null)
+    return{applicable:false,note:'Total Assets or Net Profit could not be reliably located for this export, so the O-Score cannot be computed.'};
+
+  const lnTA=Math.log(Math.max(ta,1));
+  const TL_TA=tl!=null?tl/ta:0;
+  const WC_TA=wc!=null?wc/ta:0;
+  const CL_CA=(cl!=null&&ca!=null&&ca>0)?cl/ca:0;
+  const X=(tl!=null&&tl>ta)?1:0;
+  const NI_TA=ni/ta;
+  const ffo=(pbt!=null&&depn!=null)?pbt+depn:null;
+  const FFO_TL=(ffo!=null&&tl>0)?ffo/tl:0;
+  const Y=(pats.length>=2&&pats.at(-1)<0&&pats.at(-2)<0)?1:0;
+  let dNI=0;
+  if(pats.length>=2){
+    const cur=pats.at(-1),prev=pats.at(-2),denom=Math.abs(cur)+Math.abs(prev);
+    dNI=denom>0?(cur-prev)/denom:0;
+  }
+  const Oraw=-1.32-0.407*lnTA+6.03*TL_TA-1.43*WC_TA+0.0757*CL_CA-2.37*X-1.83*NI_TA+0.285*FFO_TL-1.72*Y-0.521*dNI;
+  const Oc=Math.max(-50,Math.min(50,Oraw));
+  const P=Math.exp(Oc)/(1+Math.exp(Oc));
+  const status=P>0.5?'Elevated Risk':(P>0.2?'Watch':'Healthy');
+  return{applicable:true,rawScore:parseFloat(Oraw.toFixed(2)),probability:parseFloat((P*100).toFixed(1)),status,
+    components:{TL_TA:TL_TA.toFixed(2),WC_TA:WC_TA.toFixed(2),CL_CA:CL_CA.toFixed(2),NI_TA:NI_TA.toFixed(2),FFO_TL:FFO_TL.toFixed(2),negWorthFlag:X,persistentLossFlag:Y}};
+}
+
+function calcDuPont5(a,bs){
+  const ni=last(a.pat),pbt=last(a.pbt),ebit=last(a.ebit),sales=last(a.sales),ta=last(bs.total),eq=last(bs.equity);
+  if(ni==null||pbt==null||ebit==null||sales==null||ta==null||ta<=0||eq==null||pbt===0||ebit===0||sales===0||eq===0)
+    return{applicable:false,note:'Profit-before-tax, EBIT or balance-sheet totals could not be reliably located for this export, so the full 5-step decomposition cannot be computed.'};
+
+  const taxBurden=ni/pbt, interestBurden=pbt/ebit, opMargin=ebit/sales, assetTurnover=sales/ta, equityMultiplier=ta/eq;
+  const roeDirect=ni/eq;
+
+  const opMarginsHist=(a.ebit||[]).map((e,i)=>(e!=null&&a.sales[i])?e/a.sales[i]:null).filter(v=>v!=null);
+  const emHist=(bs.total||[]).map((t,i)=>(t!=null&&bs.equity[i])?t/bs.equity[i]:null).filter(v=>v!=null);
+  let redFlag=false,flagNote='';
+  if(opMarginsHist.length>=3&&emHist.length>=3){
+    const opTrendDown=opMarginsHist.at(-1)<opMarginsHist.at(-3)*0.95;
+    const emTrendUp=emHist.at(-1)>emHist.at(-3)*1.1;
+    if(opTrendDown&&emTrendUp){
+      redFlag=true;
+      flagNote='Operating margin is contracting while the equity multiplier (leverage) is rising over the same window — ROE growth may increasingly be leverage-driven rather than operationally-driven. Read this alongside the D/E trend in the Balance Sheet table.';
+    }
+  }
+  return{applicable:true,roe:parseFloat((roeDirect*100).toFixed(1)),
+    taxBurden:parseFloat(taxBurden.toFixed(2)),interestBurden:parseFloat(interestBurden.toFixed(2)),
+    opMargin:parseFloat((opMargin*100).toFixed(1)),assetTurnover:parseFloat(assetTurnover.toFixed(2)),
+    equityMultiplier:parseFloat(equityMultiplier.toFixed(2)),redFlag,flagNote};
+}
+
+function calcGrahamNumber(a,bs,m,sector){
+  const eps=last(a.eps),eq=last(bs.equity),shares=m.sharesCr;
+  if(eps==null||eps<=0||eq==null||!shares||shares<=0)
+    return{applicable:false,note:'Graham Number needs positive EPS and book value — not available (or the company reported a loss) in this export.'};
+  const bvps=eq/shares;
+  if(bvps<=0) return{applicable:false,note:'Negative book value per share — Graham Number is not meaningful here.'};
+  const gn=Math.sqrt(22.5*eps*bvps);
+  const cmp=m.cmp;
+  const mos=cmp?((gn-cmp)/gn*100):null;
+  return{applicable:true,value:parseFloat(gn.toFixed(1)),bvps:parseFloat(bvps.toFixed(1)),cmp,
+    marginOfSafety:mos!=null?parseFloat(mos.toFixed(1)):null,
+    verdict:mos==null?'—':(mos>0?'Trading below the Graham defensive ceiling':'Trading above the Graham defensive ceiling'),
+    reducedApplicability:sector==='consumption'};
+}
+
+function calc3StageFilter(zRes,oRes,duRes,grahamRes,a,bs,m,sector){
+  // Stage 1: Survival — reject if O-Score default probability > 50% or Z''/Z below the distress threshold
+  const s1_oOK=oRes.applicable?oRes.probability<=50:null;
+  const s1_zOK=zRes.applicable?zRes.value>=zRes.zoneThresholds.distress:null;
+  const stage1Detail=[];
+  if(oRes.applicable)stage1Detail.push(`Ohlson default probability: ${oRes.probability}% (need ≤ 50%)`);
+  if(zRes.applicable)stage1Detail.push(`${zRes.model.split('(')[0].trim()}: ${zRes.value} (need ≥ ${zRes.zoneThresholds.distress})`);
+  if(!zRes.applicable&&zRes.skipped)stage1Detail.push('Z-Score skipped for this sector — survival read from O-Score alone');
+  const stage1Pass=(s1_oOK==null&&s1_zOK==null)?null:((s1_oOK!==false)&&(s1_zOK!==false));
+
+  // Stage 2: Moat — ROE > 15%, Equity Multiplier < 2.0x (waived for banking, where leverage is structural), 3Y avg ROCE > 15%
+  const roe=duRes.applicable?duRes.roe:null;
+  const em=duRes.applicable?duRes.equityMultiplier:null;
+  const roceArr=(bs.years||[]).map((_,i)=>{
+    const ebit=i<(a.ebit||[]).length?a.ebit[i]:last(a.ebit);
+    const capEmp=(bs.equity[i]||0)+(bs.borr[i]||0);
+    return(ebit!=null&&capEmp>0)?ebit/capEmp*100:null;
+  }).filter(v=>v!=null);
+  const last3=roceArr.slice(-3);
+  const roce3y=last3.length?parseFloat((last3.reduce((x,v)=>x+v,0)/last3.length).toFixed(1)):null;
+  const stage2Detail=[];
+  if(roe!=null)stage2Detail.push(`ROE: ${roe}% (need > 15%)`);
+  if(em!=null&&sector!=='banking')stage2Detail.push(`Equity Multiplier: ${em}x (need < 2.0x)`);
+  if(em!=null&&sector==='banking')stage2Detail.push(`Equity Multiplier: ${em}x (waived — structural to banking)`);
+  if(roce3y!=null)stage2Detail.push(`3Y Avg ROCE: ${roce3y}% (need > 15%)`);
+  const stage2Pass=(roe==null&&roce3y==null)?null:
+    ((roe==null||roe>15)&&(sector==='banking'||em==null||em<2.0)&&(roce3y==null||roce3y>15));
+
+  // Stage 3: Price — Graham margin of safety for asset-heavy sectors, PEG for asset-light
+  const pe=m.trailingPE, growthProxy=a.patCagr3||a.salesCagr3;
+  const peg=(pe&&growthProxy>0)?pe/growthProxy:null;
+  const stage3Detail=[];
+  let stage3Pass=null;
+  if(grahamRes.applicable&&sector!=='consumption'){
+    stage3Pass=grahamRes.marginOfSafety!=null?grahamRes.marginOfSafety>-10:null;
+    stage3Detail.push(`Graham margin of safety: ${sign(grahamRes.marginOfSafety)}${grahamRes.marginOfSafety}% (need > -10%)`);
+    if(peg!=null)stage3Detail.push(`PEG (secondary check): ${peg.toFixed(2)}`);
+  } else if(peg!=null){
+    stage3Pass=peg<1.5;
+    stage3Detail.push(`PEG Ratio: ${peg.toFixed(2)} (need < 1.5)`);
+  }
+
+  return{
+    stage1:{pass:stage1Pass,detail:stage1Detail,label:'Survival Filter'},
+    stage2:{pass:stage2Pass,detail:stage2Detail,label:'Moat Filter'},
+    stage3:{pass:stage3Pass,detail:stage3Detail,label:'Price Filter'},
+  };
+}
+
+function buildPositives(sc,m,a,bs,cf,zRes,oRes,duRes){
+  const res=[];
+  const sc3=safe(a.salesCagr3),pc3=safe(a.patCagr3),opm=safe(last(a.opm));
+  const roe=safe(last(bs.roe)),de=safe(last(bs.deRatio),99);
+  const cash=safe(last(bs.cash)),borr=safe(last(bs.borr));
+  const cfo=last(cf.ops),pat=last(a.pat);
+  // FIX: guard with ||[] before .filter()
+  const sales=(a.sales||[]).filter(v=>v!=null);
+  if(sc3>15)res.push({t:'Strong Revenue CAGR',d:`Revenue compounded at ${sc3}% over 3 years — well above nominal GDP growth, indicating consistent market share gains.`});
+  if(pc3>sc3)res.push({t:'Operating Leverage',d:`PAT CAGR ${pc3}% outpaces revenue CAGR ${sc3}% — scale translating to disproportionate profit growth.`});
+  if(opm>15)res.push({t:`Healthy OPM (${opm}%)`,d:`OPM of ${opm}% reflects strong pricing power and cost discipline.`});
+  if(roe>18)res.push({t:`High ROE (${roe}%)`,d:`ROE of ${roe}% demonstrates excellent capital efficiency and a durable competitive moat.`});
+  if(de<0.3)res.push({t:'Virtually Debt-Free',d:`D/E of ${de}x means minimal financial risk with headroom for growth capex.`});
+  if(cash>borr)res.push({t:`Net Cash Positive`,d:`Cash ₹${fmtCr(cash)} Cr exceeds borrowings ₹${fmtCr(borr)} Cr — net cash of ₹${fmtCr(cash-borr)} Cr.`});
+  if(cfo&&pat&&cfo>pat*0.9)res.push({t:'High Quality Earnings',d:'Operating cash flow closely tracks PAT — earnings are not paper entries.'});
+  if(trend(a.opm)==='improving')res.push({t:'Margin Expansion Trend',d:'OPM on a consistent upward trend — better product mix or pricing gains driving this.'});
+  if(sales.length>=3&&sales.every((v,i)=>i===0||v>=sales[i-1]))res.push({t:'Unbroken Revenue Growth',d:`Revenue has grown every year across all ${sales.length} available years.`});
+  // NEW: cross-check the advanced diagnostics for additional evidence-backed positives
+  if(zRes.applicable&&zRes.zone==='Safe')res.push({t:`${zRes.model.split('(')[0].trim()} — Safe Zone`,d:`Score of ${zRes.value} sits comfortably in the safe zone (>${zRes.zoneThresholds.safe}) — low statistical bankruptcy risk over a 2-year horizon.`});
+  if(oRes.applicable&&oRes.status==='Healthy')res.push({t:'Low Ohlson Default Probability',d:`Modelled probability of distress is just ${oRes.probability}%, reinforcing the balance-sheet strength read elsewhere in this report.`});
+  if(duRes.applicable&&!duRes.redFlag&&duRes.roe>15)res.push({t:'DuPont-Verified Quality ROE',d:`The ${duRes.roe}% ROE decomposes into healthy operating margin and asset-turnover contributions rather than excess leverage — this is "clean" ROE.`});
+  return res.slice(0,8);
+}
+
+function buildNegatives(sc,m,a,bs,cf,zRes,oRes,duRes){
+  const res=[];
+  const sc3=safe(a.salesCagr3),opm=safe(last(a.opm)),roe=safe(last(bs.roe));
+  const de=safe(last(bs.deRatio)),pe=safe(m.trailingPE),dd=safe(last(bs.ddays));
+  const cfo=last(cf.ops),pat=last(a.pat);
+  // FIX: guard with ||[] before .filter()
+  const pats=(a.pat||[]).filter(v=>v!=null);
+  const negPat=pats.filter((v,i)=>i>0&&v<pats[i-1]).length;
+  if(pe>40)res.push({t:`Expensive Valuation (${pe}x P/E)`,d:`At ${pe}x trailing P/E, priced for perfection — any miss risks 20–35% de-rating.`});
+  else if(pe>30)res.push({t:`Premium Valuation (${pe}x P/E)`,d:`${pe}x already prices in significant forward growth, leaving narrow margin of safety.`});
+  if(de>1.5)res.push({t:`High Leverage (D/E ${de}x)`,d:`D/E of ${de}x creates meaningful financial risk — rising rates or slowdown could stress cash flows.`});
+  if(opm<8)res.push({t:`Thin Margins (${opm}%)`,d:`OPM of ${opm}% leaves limited buffer against input cost inflation.`});
+  if(roe<12)res.push({t:`Weak ROE (${roe}%)`,d:`ROE of ${roe}% is below cost of equity — business not generating adequate returns on capital.`});
+  if(dd>70)res.push({t:`High Debtor Days (${dd} days)`,d:`${dd} days receivables outstanding raises working capital stress and collection quality concerns.`});
+  if(cfo&&pat&&pat>0&&cfo<pat*0.5)res.push({t:'Weak Cash Conversion',d:'Operating cash flow significantly below PAT — suggests aggressive revenue recognition or rising working capital.'});
+  if(negPat>=2)res.push({t:'Inconsistent Profit Track Record',d:`PAT declined YoY in ${negPat} of last ${pats.length-1} years — cyclicality or recurring charges.`});
+  if(trend(a.opm)==='declining')res.push({t:'Margin Compression Trend',d:'OPM declining — rising input costs, pricing pressure, or deteriorating business mix.'});
+  if(sc3<8)res.push({t:'Sluggish Revenue Growth',d:`3Y revenue CAGR of ${sc3}% is modest and may struggle to outpace inflation.`});
+  // NEW: cross-check the advanced diagnostics for additional evidence-backed risks
+  if(zRes.applicable&&zRes.zone==='Distress')res.push({t:`${zRes.model.split('(')[0].trim()} — Distress Zone`,d:`Score of ${zRes.value} is below the ${zRes.zoneThresholds.distress} distress threshold — statistically elevated bankruptcy risk over a 2-year horizon. Treat as a screen to investigate further, not a verdict on its own.`});
+  if(oRes.applicable&&oRes.status==='Elevated Risk')res.push({t:'Elevated Ohlson Default Probability',d:`Modelled probability of distress is ${oRes.probability}% — above the 50% threshold used as an institutional survival screen.`});
+  if(duRes.applicable&&duRes.redFlag)res.push({t:'DuPont Red Flag: Leverage-Masked ROE',d:duRes.flagNote});
+  return res.slice(0,8);
+}
+
+function buildPeers(m,a){
+  const pe=safe(m.trailingPE),opm=safe(last(a.opm)),sc3=safe(a.salesCagr3);
+  const subj={name:m.companyName+' ✦',pe:pe?pe.toFixed(1)+'x':'—',roe:'—',opm:opm.toFixed(1)+'%',cagr3:sc3?sc3+'%':'—',de:'—',highlight:true};
+  const peers=[subj];
+  for(let i=1;i<=4;i++){
+    const nm=document.getElementById('p'+i+'n')?.value?.trim();
+    const dt=document.getElementById('p'+i+'d')?.value?.trim();
+    if(nm){const pts=dt?dt.split('·').map(s=>s.trim()):[];peers.push({name:nm,pe:pts[0]||'—',roe:pts[1]||'—',opm:pts[2]||'—',cagr3:'—',de:'—',highlight:false});}
+  }
+  return peers;
+}
+
+// ─── Main generate flow ───────────────────────────────────────────────────────
+async function generate(){
+  if(!files.xlsx){showErr('Please upload the screener.in Excel file first.');return;}
+  hideErr();
+  const sector=document.getElementById('sector-select').value;
+  document.getElementById('upload-card').style.display='none';
+  document.getElementById('prog-card').style.display='block';
+  setStep(2);logLines=[];
+
+  try{
+    await log('Loading Excel and Word libraries...',4);
+    try{
+      await window.__xlsxReady;
+    }catch(e){
+      throw new Error('Could not load the Excel-reading library from either source (cdnjs or jsdelivr). This is usually a network policy or ad-blocker blocking script CDNs - check your connection, try disabling content-blocking extensions for this page, or try a different network, then reload the page.');
+    }
+    try{
+      await window.__docxReady;
+    }catch(e){
+      throw new Error('Could not load the Word-report library from either source (unpkg or jsdelivr). This is usually a network policy or ad-blocker blocking script CDNs - check your connection, try disabling content-blocking extensions for this page, or try a different network, then reload the page.');
+    }
+
+    await log('Reading Excel file...',8);
+    const buf=await files.xlsx.arrayBuffer();
+    const arr=new Uint8Array(buf);
+
+    await log('Parsing financial data from screener.in format...',20);
+    const data=parseExcel(arr);
+
+    await log('Running 8-dimension scoring engine...',34);
+    const scores={
+      growth:scoreGrowth(data.annual,data.quarterly),
+      margins:scoreMargins(data.annual),
+      balanceSheet:scoreBS(data.balanceSheet),
+      cashflow:scoreCF(data.cashFlow,data.annual),
+      returns:scoreRet(data.balanceSheet),
+      workingCap:scoreWC(data.balanceSheet),
+      valuation:scoreVal(data.meta,data.annual),
+      consistency:scoreCons(data.annual),
+    };
+
+    await log('Deriving investment ratings...',44);
+    const ratings=deriveRatings(scores,data.meta,data.annual);
+
+    await log('Building valuation (P/E, EV/EBITDA, DCF)...',54);
+    const valuation=buildVal(data.meta,data.annual,data.balanceSheet);
+
+    await log('Computing Altman Z-Score & Ohlson O-Score...',64);
+    const zRes=calcAltmanZ(sector,data.annual,data.balanceSheet,data.meta);
+    const oRes=calcOhlsonO(data.annual,data.balanceSheet);
+
+    await log('Running DuPont 5-step & Graham Number...',72);
+    const duRes=calcDuPont5(data.annual,data.balanceSheet);
+    const grahamRes=calcGrahamNumber(data.annual,data.balanceSheet,data.meta,sector);
+    const filterRes=calc3StageFilter(zRes,oRes,duRes,grahamRes,data.annual,data.balanceSheet,data.meta,sector);
+
+    await log('Assembling investment strategy...',82);
+    const strategy=buildStrategy(ratings,data.meta,data.annual);
+    const positives=buildPositives(scores,data.meta,data.annual,data.balanceSheet,data.cashFlow,zRes,oRes,duRes);
+    const negatives=buildNegatives(scores,data.meta,data.annual,data.balanceSheet,data.cashFlow,zRes,oRes,duRes);
+    const peers=buildPeers(data.meta,data.annual);
+    // Pass bs ref for peers
+    data.annual.balanceSheet=data.balanceSheet;
+
+    const fd={data,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector};
+
+    await log('Rendering results...',90);
+    renderResults(fd);
+
+    await log('Building Word document...',96);
+    docxBlob=await buildDocx(fd);
+    document.getElementById('dl-btn').onclick=()=>dlDocx(docxBlob,data.meta.companyName);
+
+    setProgress(100);
+    await log('Done! ✓',100);
+    document.getElementById('prog-card').style.display='none';
+    document.getElementById('res-card').style.display='block';
+    setStep(3);
+
+  }catch(e){
+    document.getElementById('prog-card').style.display='none';
+    document.getElementById('upload-card').style.display='block';
+    showErr('Error: '+e.message);
+    setStep(1);console.error(e);
+  }
+}
+
+async function log(msg,pct){
+  logLines.push(msg);
+  document.getElementById('plog').innerHTML=logLines.map((l,i)=>
+    `<div class="plog-line ${i===logLines.length-1?'cur':'done'}">${i===logLines.length-1?'▶':'✓'} ${l}</div>`
+  ).join('');
+  setProgress(pct);
+  await new Promise(r=>setTimeout(r,100));
+}
+function setProgress(p){document.getElementById('pbar').style.width=p+'%';}
+
+// ─── Render preview ───────────────────────────────────────────────────────────
+function ratingStyle(r=''){
+  const u=r.toUpperCase();
+  if(u.includes('STRONG BUY')||u.includes('BUY'))return'color:var(--green);background:var(--lgreen)';
+  if(u.includes('HOLD'))return'color:var(--amber);background:var(--lamber)';
+  return'color:var(--red);background:var(--lred)';
+}
+function scoreColor(v){if(v>=8)return'#15803d';if(v>=6)return'#0369a1';if(v>=4)return'#b45309';return'#b91c1c';}
+function fsClass(p){return p===true?'pass':(p===false?'fail':'na');}
+function fsIcon(p){return p===true?'✓':(p===false?'✗':'—');}
+function fsVerdict(p){return p===true?'PASS':(p===false?'FAIL':'N/A');}
+function zoneCss(zone){return zone==='Safe'?'zone-safe':(zone==='Grey'?'zone-grey':'zone-distress');}
+function zoneBadge(zone){
+  if(zone==='Safe')return'color:var(--green);background:var(--lgreen)';
+  if(zone==='Grey')return'color:var(--amber);background:var(--lamber)';
+  return'color:var(--red);background:var(--lred)';
+}
+
+function renderResults(fd){
+  const{data:d,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector}=fd;
+  const m=d.meta,ann=d.annual,qtr=d.quarterly,bs=d.balanceSheet,cf=d.cashFlow;
+  let h='';
+
+  // Banner
+  h+=`<div class="company-banner">
+    <div class="cb-name">${m.companyName}</div>
+    <div class="cb-meta">CMP ₹${m.cmp} &nbsp;|&nbsp; Mkt Cap ₹${fmtCr(m.mktCap)} Cr &nbsp;|&nbsp; P/E ${m.trailingPE||'—'}x &nbsp;|&nbsp; FV ₹${m.faceValue} &nbsp;|&nbsp; P/Sales ${m.trailingPS||'—'}x</div>
+  </div>`;
+
+  if(m.looksLikeBank){
+    h+=`<div class="warn-box warn-bank">⚠ <strong>This looks like a Bank/NBFC</strong> — its Data Sheet is built around Interest Income rather than Sales. The 8-dimension scorecard and Z-Score are calibrated for non-financial companies and may be unreliable here. Lean on the DuPont ROE decomposition below and check asset-quality/NPA data separately.</div>`;
+  }
+  if(!m.advRowsVerified){
+    h+=`<div class="warn-box warn-rows">⚠ <strong>Advanced-model inputs auto-detected, not label-confirmed</strong> — Profit-before-tax, Tax and/or Other Liabilities didn't sit exactly where expected on this export's Data Sheet, so the tool located them by searching nearby row labels instead. This is usually fine, but if the Distress Diagnostics, DuPont or Graham figures below look off, spot-check them against the source Excel.</div>`;
+  }
+
+  // Ratings
+  h+=`<div class="ratings-strip">`;
+  strategy.forEach(s=>{h+=`<div class="rat-box" style="${ratingStyle(s.rating)}"><div class="rat-h">${s.label}</div><div class="rat-call">${s.rating}</div><div class="rat-tgt">${s.target}</div><div class="rat-tgt">${s.upside}</div></div>`;});
+  h+=`</div>`;
+
+  // NEW: 3-Stage Institutional Filter
+  h+=`<div class="sec-label">Institutional 3-Stage Quality Filter</div>`;
+  h+=`<div class="filter-funnel">`;
+  [filterRes.stage1,filterRes.stage2,filterRes.stage3].forEach(s=>{
+    h+=`<div class="filter-stage ${fsClass(s.pass)}"><div class="fs-icon">${fsIcon(s.pass)}</div><div class="fs-label">${s.label}</div><div class="fs-verdict">${fsVerdict(s.pass)}</div><div class="fs-detail">${s.detail.length?s.detail.join('<br>'):'Insufficient data for this export'}</div></div>`;
+  });
+  h+=`</div>`;
+  const stagesArr=[filterRes.stage1,filterRes.stage2,filterRes.stage3];
+  const passCount=stagesArr.filter(s=>s.pass===true).length;
+  const applicableCount=stagesArr.filter(s=>s.pass!==null).length;
+  h+=`<div class="filter-overall">${passCount}/${applicableCount||3} applicable institutional filters passed — Survival → Moat → Price</div>`;
+
+  // Score card
+  h+=`<div class="sec-label">Financial Health Scorecard</div>`;
+  const snames={growth:'Growth',margins:'Margins',balanceSheet:'Balance Sheet',cashflow:'Cash Flow',returns:'Returns',workingCap:'Working Capital',valuation:'Valuation',consistency:'Consistency'};
+  h+=`<div class="scores-grid">`;
+  Object.entries(scores).forEach(([k,v])=>{const c=scoreColor(v);h+=`<div class="score-box"><div class="score-name">${snames[k]}</div><div class="score-val" style="color:${c}">${v}/10</div><div class="score-bar-wrap"><div class="score-bar" style="width:${v*10}%;background:${c}"></div></div></div>`;});
+  h+=`</div><div style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem">Composite: <strong>${ratings.composite}/10</strong></div>`;
+
+  // CAGR tags
+  h+=`<div style="margin:.5rem 0">`;
+  if(ann.salesCagr3)h+=`<span class="tag tag-g">Rev CAGR 3Y: ${ann.salesCagr3}%</span>`;
+  if(ann.salesCagr5)h+=`<span class="tag tag-g">Rev CAGR 5Y: ${ann.salesCagr5}%</span>`;
+  if(ann.patCagr3)h+=`<span class="tag tag-g">PAT CAGR 3Y: ${ann.patCagr3}%</span>`;
+  h+=`</div>`;
+
+  // NEW: Financial Distress Diagnostics
+  h+=`<div class="sec-label">Financial Distress Diagnostics</div>`;
+  h+=`<div class="diag-grid">`;
+  if(zRes.applicable){
+    h+=`<div class="diag-box ${zoneCss(zRes.zone)}"><div class="diag-name">${zRes.model}</div><div class="diag-val">${zRes.value}</div><span class="diag-zone" style="${zoneBadge(zRes.zone)}">${zRes.zone} Zone</span>
+      <div class="diag-comp">X1 (WC/TA): ${zRes.components.X1} &nbsp; X2 (RE/TA): ${zRes.components.X2}<br>X3 (EBIT/TA): ${zRes.components.X3} &nbsp; X4: ${zRes.components.X4}${zRes.components.X5?` &nbsp; X5: ${zRes.components.X5}`:''}</div></div>`;
+  } else {
+    h+=`<div class="diag-box"><div class="diag-name">Altman Z-Score</div><div class="diag-val" style="font-size:1rem;color:var(--muted)">Not Applicable</div><div class="diag-note">${zRes.note}</div></div>`;
+  }
+  if(oRes.applicable){
+    const oZone=oRes.status==='Healthy'?'Safe':(oRes.status==='Watch'?'Grey':'Distress');
+    h+=`<div class="diag-box ${zoneCss(oZone)}"><div class="diag-name">Ohlson O-Score</div><div class="diag-val">${oRes.probability}%</div><span class="diag-zone" style="${zoneBadge(oZone)}">${oRes.status} — Prob. of Default</span>
+      <div class="diag-comp">Raw O-Score: ${oRes.rawScore} &nbsp; TL/TA: ${oRes.components.TL_TA}<br>FFO/TL: ${oRes.components.FFO_TL} &nbsp; 2Y Loss Flag: ${oRes.components.persistentLossFlag?'Yes':'No'}</div>
+      <div class="diag-note">Adapted from Ohlson (1980) — original coefficients were never re-calibrated for INR/Indian markets, so treat this as a directional signal, not a precise probability.</div></div>`;
+  } else {
+    h+=`<div class="diag-box"><div class="diag-name">Ohlson O-Score</div><div class="diag-val" style="font-size:1rem;color:var(--muted)">Not Applicable</div><div class="diag-note">${oRes.note}</div></div>`;
+  }
+  h+=`</div>`;
+
+  // NEW: DuPont 5-Step
+  h+=`<div class="sec-label">DuPont 5-Step ROE Decomposition</div>`;
+  if(duRes.applicable){
+    h+=`<div class="dupont-chain">
+      <div class="dp-box"><div class="dp-name">Tax Burden</div><div class="dp-val">${duRes.taxBurden}</div></div><div class="dp-op">×</div>
+      <div class="dp-box"><div class="dp-name">Interest Burden</div><div class="dp-val">${duRes.interestBurden}</div></div><div class="dp-op">×</div>
+      <div class="dp-box"><div class="dp-name">Op. Margin</div><div class="dp-val">${duRes.opMargin}%</div></div><div class="dp-op">×</div>
+      <div class="dp-box"><div class="dp-name">Asset T/O</div><div class="dp-val">${duRes.assetTurnover}x</div></div><div class="dp-op">×</div>
+      <div class="dp-box"><div class="dp-name">Equity Mult.</div><div class="dp-val">${duRes.equityMultiplier}x</div></div><div class="dp-op">=</div>
+      <div class="dp-eq"><div class="dp-name" style="color:#93c5fd">ROE</div><div class="dp-val" style="color:#fff">${duRes.roe}%</div></div>
+    </div>`;
+    h+=duRes.redFlag?`<div class="dp-flag warn">⚠ <strong>Red Flag:</strong> ${duRes.flagNote}</div>`:`<div class="dp-flag ok">✓ ROE growth appears operationally driven — not excessively dependent on rising leverage.</div>`;
+  } else {
+    h+=`<div class="diag-note">${duRes.note}</div>`;
+  }
+
+  // Annual P&L
+  h+=`<div class="sec-label">Annual P&L (₹ Cr)</div>`;
+  const ay=ann.years,sy=Math.max(0,ay.length-7),showY=ay.slice(sy);
+  h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Metric</th>${showY.map(y=>`<th>${y}</th>`).join('')}</tr></thead><tbody>`;
+  function arow(lbl,arr,fmt){const v=arr.slice(sy);return`<tr><td>${lbl}</td>${v.map(x=>`<td>${x!=null?fmt(x):'—'}</td>`).join('')}</tr>`;}
+  h+=arow('Revenue',ann.sales,fmtCr)+arow('Op. Profit',ann.opProfit,fmtCr)+arow('OPM %',ann.opm,fmtPct)+arow('EBIT',ann.ebit,fmtCr)+arow('PAT',ann.pat,fmtCr)+arow('EPS (₹)',ann.eps,v=>v.toFixed(1))+arow('CFO',cf.ops,fmtCr);
+  h+=`</tbody></table></div>`;
+
+  // Quarterly
+  h+=`<div class="sec-label">Quarterly Trend (₹ Cr)</div>`;
+  const qp=qtr.periods.slice(-8),nqp=qp.length;
+  h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Metric</th>${qp.map(p=>`<th>${p}</th>`).join('')}</tr></thead><tbody>`;
+  h+=`<tr><td>Revenue</td>${qtr.sales.slice(-nqp).map(v=>`<td>${fmtCr(v)}</td>`).join('')}</tr>`;
+  h+=`<tr><td>Op. Profit</td>${qtr.opProfit.slice(-nqp).map(v=>`<td>${fmtCr(v)}</td>`).join('')}</tr>`;
+  h+=`<tr><td>OPM %</td>${qtr.opm.slice(-nqp).map(v=>`<td>${fmtPct(v)}</td>`).join('')}</tr>`;
+  h+=`<tr><td>PAT</td>${qtr.pat.slice(-nqp).map(v=>`<td>${fmtCr(v)}</td>`).join('')}</tr>`;
+  h+=`</tbody></table></div>`;
+
+  // Balance Sheet
+  h+=`<div class="sec-label">Balance Sheet (₹ Cr)</div>`;
+  const bsy=bs.years.slice(-6),bsn=bsy.length;
+  h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Metric</th>${bsy.map(y=>`<th>${y}</th>`).join('')}</tr></thead><tbody>`;
+  function brow(lbl,arr,fmt){const v=arr.slice(-bsn);return`<tr><td>${lbl}</td>${v.map(x=>`<td>${x!=null?fmt(x):'—'}</td>`).join('')}</tr>`;}
+  h+=brow('Total Assets',bs.total,fmtCr)+brow('Equity',bs.equity,fmtCr)+brow('Borrowings',bs.borr,fmtCr)+brow('Other Liab.',bs.otherLiab,fmtCr)+brow('Cash',bs.cash,fmtCr)+brow('Receivables',bs.recv,fmtCr);
+  h+=`<tr><td>ROE %</td>${bs.roe.slice(-bsn).map(v=>`<td>${fmtPct(v)}</td>`).join('')}</tr>`;
+  h+=`<tr><td>D/E Ratio</td>${bs.deRatio.slice(-bsn).map(v=>`<td>${v!=null?v.toFixed(2)+'x':'—'}</td>`).join('')}</tr>`;
+  h+=`<tr><td>Debtor Days</td>${bs.ddays.slice(-bsn).map(v=>`<td>${v!=null?v.toFixed(0):'—'}</td>`).join('')}</tr>`;
+  h+=`</tbody></table></div>`;
+  h+=`<div style="font-size:.68rem;color:var(--muted);margin-top:-.4rem">Note: screener's Data Sheet doesn't split current vs. non-current liabilities, so Current Liabilities (used in the Ohlson O-Score above) is approximated as "Other Liabilities" — treat that specific ratio as directional.</div>`;
+
+  // NEW: Sectoral Thesis Alignment
+  if(sector!=='general'&&SECTOR_INFO[sector]){
+    const si=SECTOR_INFO[sector];
+    h+=`<div class="sec-label">Sectoral Thesis Alignment — ${si.label}</div>`;
+    h+=`<div class="thesis-card"><div class="thesis-grid">
+      <div class="thesis-col cat"><h5>Growth Catalysts</h5><ul>${si.catalysts.map(c=>`<li>${c}</li>`).join('')}</ul></div>
+      <div class="thesis-col risk"><h5>Risk Factors</h5><ul>${si.risks.map(r=>`<li>${r}</li>`).join('')}</ul></div>
+    </div><div class="thesis-focus"><strong>Quantitative focus:</strong> ${si.quantFocus}</div></div>`;
+  }
+
+  // Competitor
+  if(peers.length>1){
+    h+=`<div class="sec-label">Competitor Analysis</div>`;
+    h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Company</th><th>P/E</th><th>ROE %</th><th>OPM %</th><th>Rev CAGR 3Y</th><th>D/E</th></tr></thead><tbody>`;
+    peers.forEach(p=>{const bg=p.highlight?'background:var(--light)':'';h+=`<tr style="${bg}"><td style="${p.highlight?'color:var(--accent);font-weight:600':''}">${p.name}</td><td>${p.pe}</td><td>${p.roe}</td><td>${p.opm}</td><td>${p.cagr3}</td><td>${p.de}</td></tr>`;});
+    h+=`</tbody></table></div>`;
+  }
+
+  // Pos / Neg
+  h+=`<div class="sec-label">Strengths &amp; Risks</div>`;
+  h+=`<div class="pos-neg"><div>`;
+  positives.forEach(p=>{h+=`<div class="pn-item p-item"><strong>+ ${p.t}</strong>${p.d}</div>`;});
+  h+=`</div><div>`;
+  negatives.forEach(n=>{h+=`<div class="pn-item n-item"><strong>- ${n.t}</strong>${n.d}</div>`;});
+  h+=`</div></div>`;
+
+  // Valuation
+  h+=`<div class="sec-label">Valuation Framework</div>`;
+  h+=`<div class="val-grid">
+    <div class="val-box"><div class="val-method">P/E Method</div><div class="val-bull">Bull: ${valuation.pe.bull}</div><div class="val-base">Base: ${valuation.pe.base}</div><div class="val-bear">Bear: ${valuation.pe.bear}</div><div class="val-note">${valuation.pe.note}</div></div>
+    <div class="val-box"><div class="val-method">EV/EBITDA</div><div class="val-bull">Bull: ${valuation.ev.bull}</div><div class="val-base">Base: ${valuation.ev.base}</div><div class="val-bear">Bear: ${valuation.ev.bear}</div><div class="val-note">${valuation.ev.note}</div></div>
+    <div class="val-box"><div class="val-method">DCF</div><div class="val-bull">Bull: ${valuation.dcf.bull}</div><div class="val-base">Base: ${valuation.dcf.base}</div><div class="val-bear">Bear: ${valuation.dcf.bear}</div><div class="val-note">${valuation.dcf.note}</div></div>
+    ${grahamRes.applicable?`<div class="val-box"><div class="val-method">Graham Number</div><div class="val-bull">Value: ₹${grahamRes.value}</div><div class="val-base">CMP: ₹${grahamRes.cmp}</div><div class="${grahamRes.marginOfSafety>0?'val-bull':'val-bear'}">MoS: ${sign(grahamRes.marginOfSafety)}${grahamRes.marginOfSafety}%</div><div class="val-note">${grahamRes.verdict}${grahamRes.reducedApplicability?' — reduced relevance for asset-light names in this sector':''}</div></div>`:''}
+  </div>`;
+
+  document.getElementById('res-content').innerHTML=h;
+}
+
+// ─── Build DOCX ───────────────────────────────────────────────────────────────
+async function buildDocx(fd){
+  const docxLib=window.docx;
+  if(!docxLib) throw new Error('docx library failed to load. Check your internet connection and try again.');
+  const{Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,AlignmentType,BorderStyle,WidthType,ShadingType,VerticalAlign,LevelFormat}=docxLib;
+  const{data:d,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector}=fd;
+  const m=d.meta,ann=d.annual,qtr=d.quarterly,bs=d.balanceSheet,cf=d.cashFlow;
+  const W=9360,NAV='1A3C6E',LIGHT='EBF0F8',WHITE='FFFFFF',DARK='1C1C1C',GRAY='F5F5F5';
+  const GREEN='1B5E20',RED='C62828',AMBER='E65100',LAMBER='FEF3C7';
+  const b={style:BorderStyle.SINGLE,size:1,color:'CCCCCC'},allB={top:b,bottom:b,left:b,right:b};
+
+  function tr2(text,o={}){return new TextRun({text:String(text??""),font:"Arial",size:o.size||19,bold:o.bold,color:o.color||DARK,italics:o.italic});}
+  function pp2(t,o={}){const runs=typeof t==="string"?[tr2(t,o)]:t;return new Paragraph({children:runs,alignment:o.align,spacing:{before:o.before??50,after:o.after??50},shading:o.fill?{fill:o.fill,type:ShadingType.CLEAR}:undefined,numbering:o.bullet?{reference:"bullets",level:0}:undefined});}
+  function tc2(text,o={}){const{w=1000,fill=WHITE,bold=false,color=DARK,align=AlignmentType.LEFT,size=17}=o;return new TableCell({borders:allB,width:{size:w,type:WidthType.DXA},shading:{fill,type:ShadingType.CLEAR},margins:{top:55,bottom:55,left:90,right:90},verticalAlign:VerticalAlign.CENTER,children:[new Paragraph({alignment:align,spacing:{before:0,after:0},children:[tr2(text,{bold,color,size})]})]});}
+  const thc2=(t,w)=>tc2(t,{w,fill:NAV,bold:true,color:WHITE,size:17});
+  function tbl2(hds,rows,widths){return new Table({width:{size:W,type:WidthType.DXA},columnWidths:widths,rows:[new TableRow({children:hds.map((h,i)=>thc2(h,widths[i]))}), ...rows.map((row,ri)=>new TableRow({children:row.map((cell,ci)=>tc2(cell,{w:widths[ci],fill:ri%2===1?GRAY:WHITE,bold:ci===0,align:ci===0?AlignmentType.LEFT:AlignmentType.RIGHT}))}))]}); }
+  function sH(title){return new Paragraph({children:[tr2(title,{bold:true,size:22,color:WHITE})],shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:200,after:80},indent:{left:160}});}
+  function sp2(n=50){return new Paragraph({children:[tr2("")],spacing:{before:n,after:0}});}
+  function rC(r=""){const u=r.toUpperCase();if(u.includes("BUY"))return GREEN;if(u.includes("SELL")||u.includes("AVOID"))return RED;return AMBER;}
+  function zC(zone){if(zone==='Safe')return GREEN;if(zone==='Grey')return AMBER;return RED;}
+  function fsColor(p){return p===true?GREEN:(p===false?RED:"888888");}
+  function fsText(p){return p===true?"PASS":(p===false?"FAIL":"N/A");}
+
+  const ch=[];
+  // Cover
+  ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:0},children:[tr2(m.companyName,{bold:true,size:36,color:WHITE})]}));
+  ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:0},children:[tr2("Equity Research Report  |  "+new Date().toLocaleDateString('en-IN',{year:'numeric',month:'long'}),{size:20,color:"93C5FD"})]}));
+  ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:80},children:[tr2(`CMP ₹${m.cmp}  |  Mkt Cap ₹${fmtCr(m.mktCap)} Cr  |  P/E ${m.trailingPE||"—"}x  |  FV ₹${m.faceValue}`,{size:19,color:WHITE})]}));
+
+  if(m.looksLikeBank){
+    ch.push(pp2([tr2("⚠ BANK/NBFC DETECTED — ",{bold:true,color:AMBER,size:18}),tr2("standard scorecard and Z-Score are calibrated for non-financial companies and may be unreliable here. Refer to the DuPont decomposition and asset-quality data separately.",{size:17})],{before:80,after:20,fill:LAMBER}));
+  }
+  if(!m.advRowsVerified){
+    ch.push(pp2([tr2("⚠ ADVANCED INPUTS NOT LABEL-CONFIRMED — ",{bold:true,color:AMBER,size:18}),tr2("Profit-before-tax, Tax and/or Other Liabilities were located by nearby-row search rather than an exact label match on this export. Spot-check the Distress Diagnostics, DuPont and Graham figures against the source Excel.",{size:17})],{before:20,after:20,fill:LAMBER}));
+  }
+
+  // Rating strip
+  const rw=[W/4,W/4,W/4,W/4];
+  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:rw,rows:[new TableRow({children:strategy.map(s=>new TableCell({borders:allB,width:{size:W/4,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:100,right:100},children:[new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.label,{size:16,color:"546E7A"})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.rating,{bold:true,size:22,color:rC(s.rating)})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.target,{size:17})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.upside,{size:16,color:"546E7A"})]})]}))})]})  );
+  ch.push(sp2(80));
+
+  // NEW: 3-Stage Filter
+  ch.push(sH("INSTITUTIONAL 3-STAGE QUALITY FILTER"));ch.push(sp2(30));
+  const fsW=[3120,3120,3120];
+  const stagesArr=[filterRes.stage1,filterRes.stage2,filterRes.stage3];
+  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:fsW,rows:[new TableRow({children:stagesArr.map(s=>new TableCell({borders:allB,width:{size:3120,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:100,bottom:100,left:100,right:100},children:[
+    new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.label,{size:16,color:"546E7A"})]}),
+    new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:20,after:40},children:[tr2(fsText(s.pass),{bold:true,size:24,color:fsColor(s.pass)})]}),
+    ...(s.detail.length?s.detail.map(dt=>new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:10,after:0},children:[tr2(dt,{size:14,color:"666666"})]})):[new Paragraph({alignment:AlignmentType.CENTER,children:[tr2("Insufficient data",{size:14,color:"999999",italic:true})]})]),
+  ]}))})]}));
+  ch.push(sp2(60));
+
+  // Scores
+  ch.push(sH("FINANCIAL HEALTH SCORECARD"));ch.push(sp2(30));
+  const snames2={growth:"Growth",margins:"Margins",balanceSheet:"Balance Sheet",cashflow:"Cash Flow",returns:"Returns",workingCap:"Working Capital",valuation:"Valuation",consistency:"Consistency"};
+  ch.push(tbl2(["Dimension","Score","Visual (10 max)"],Object.entries(scores).map(([k,v])=>[snames2[k]||k,`${v}/10`,"█".repeat(v)+"░".repeat(10-v)]),[2340,1440,5580]));
+  ch.push(pp2(`Composite: ${ratings.composite}/10  |  6M: ${ratings.r6m}  |  1Y: ${ratings.r1y}  |  3Y: ${ratings.r3y}  |  5Y: ${ratings.r5y}`,{bold:true,before:60,after:60,fill:LIGHT}));
+
+  // NEW: Financial Distress Diagnostics
+  ch.push(sH("FINANCIAL DISTRESS DIAGNOSTICS"));ch.push(sp2(30));
+  if(zRes.applicable){
+    ch.push(pp2([tr2(zRes.model+":  ",{bold:true,size:19}),tr2(`${zRes.value}   (${zRes.zone} Zone)`,{bold:true,size:19,color:zC(zRes.zone)})],{before:40,after:20}));
+    ch.push(pp2(`Components — X1 (WC/TA): ${zRes.components.X1}, X2 (RE/TA): ${zRes.components.X2}, X3 (EBIT/TA): ${zRes.components.X3}, X4: ${zRes.components.X4}${zRes.components.X5?`, X5: ${zRes.components.X5}`:''}`,{size:16,before:0,after:60}));
+  } else {
+    ch.push(pp2("Altman Z-Score: Not Applicable — "+zRes.note,{size:17,italic:true,before:40,after:60}));
+  }
+  if(oRes.applicable){
+    ch.push(pp2([tr2("Ohlson O-Score Probability of Default:  ",{bold:true,size:19}),tr2(`${oRes.probability}%   (${oRes.status})`,{bold:true,size:19,color:oRes.status==='Healthy'?GREEN:(oRes.status==='Watch'?AMBER:RED)})],{before:40,after:20}));
+    ch.push(pp2("Note: adapted from Ohlson (1980); coefficients were not re-calibrated for Indian markets — treat as a directional signal, not a precise probability.",{size:15,italic:true,before:0,after:60}));
+  } else {
+    ch.push(pp2("Ohlson O-Score: Not Applicable — "+oRes.note,{size:17,italic:true,before:40,after:60}));
+  }
+
+  // NEW: DuPont 5-step
+  ch.push(sH("DUPONT 5-STEP ROE DECOMPOSITION"));ch.push(sp2(30));
+  if(duRes.applicable){
+    ch.push(tbl2(["Tax Burden","Interest Burden","Op. Margin","Asset Turnover","Equity Mult.","= ROE"],[[duRes.taxBurden,duRes.interestBurden,duRes.opMargin+"%",duRes.assetTurnover+"x",duRes.equityMultiplier+"x",duRes.roe+"%"]],[1560,1560,1560,1560,1560,1560]));
+    ch.push(pp2(duRes.redFlag?("⚠ RED FLAG: "+duRes.flagNote):"✓ ROE growth appears operationally driven, not excessively leverage-dependent.",{size:17,bold:duRes.redFlag,color:duRes.redFlag?RED:GREEN,before:60,after:40}));
+  } else {
+    ch.push(pp2("DuPont Decomposition: Not Applicable — "+duRes.note,{size:17,italic:true,before:40,after:60}));
+  }
+
+  // Annual
+  ch.push(sH("ANNUAL P&L  (₹ Cr)"));ch.push(sp2(30));
+  const ay=ann.years,sy=Math.max(0,ay.length-7),showY=ay.slice(sy);
+  const aw=[1860,...Array(showY.length).fill(Math.floor((W-1860)/showY.length))];
+  ch.push(tbl2(["Metric",...showY],[
+    ["Revenue",...ann.sales.slice(sy).map(fmtCr)],["Op. Profit",...ann.opProfit.slice(sy).map(fmtCr)],
+    ["OPM %",...ann.opm.slice(sy).map(fmtPct)],["EBIT",...ann.ebit.slice(sy).map(fmtCr)],["PAT",...ann.pat.slice(sy).map(fmtCr)],
+    ["EPS (₹)",...ann.eps.slice(sy).map(v=>v?v.toFixed(1):"—")],["CFO",...cf.ops.slice(sy).map(fmtCr)],
+  ],aw));
+  ch.push(pp2(`Revenue CAGR 3Y: ${ann.salesCagr3||"—"}%  |  5Y: ${ann.salesCagr5||"—"}%  |  PAT CAGR 3Y: ${ann.patCagr3||"—"}%`,{before:50,after:50}));
+
+  // Quarterly
+  ch.push(sH("QUARTERLY TREND  (₹ Cr)"));ch.push(sp2(30));
+  const qps=qtr.periods.slice(-8),nqc=qps.length;
+  const qw=[1560,...Array(nqc).fill(Math.floor((W-1560)/nqc))];
+  ch.push(tbl2(["Metric",...qps],[
+    ["Revenue",...qtr.sales.slice(-nqc).map(fmtCr)],["Op. Profit",...qtr.opProfit.slice(-nqc).map(fmtCr)],
+    ["OPM %",...qtr.opm.slice(-nqc).map(fmtPct)],["PAT",...qtr.pat.slice(-nqc).map(fmtCr)],
+  ],qw));
+
+  // Balance Sheet
+  ch.push(sH("BALANCE SHEET  (₹ Cr)"));ch.push(sp2(30));
+  const bsy=bs.years.slice(-6),bsn=bsy.length;
+  const bw=[2160,...Array(bsn).fill(Math.floor((W-2160)/bsn))];
+  ch.push(tbl2(["Metric",...bsy],[
+    ["Total Assets",...bs.total.slice(-bsn).map(fmtCr)],["Equity",...bs.equity.slice(-bsn).map(fmtCr)],["Borrowings",...bs.borr.slice(-bsn).map(fmtCr)],
+    ["Cash",...bs.cash.slice(-bsn).map(fmtCr)],["ROE %",...bs.roe.slice(-bsn).map(fmtPct)],
+    ["D/E Ratio",...bs.deRatio.slice(-bsn).map(v=>v!=null?v.toFixed(2)+"x":"—")],
+    ["Debtor Days",...bs.ddays.slice(-bsn).map(v=>v!=null?v.toFixed(0):"—")],
+  ],bw));
+
+  // NEW: Sectoral Thesis Alignment
+  if(sector!=='general'&&SECTOR_INFO[sector]){
+    const si=SECTOR_INFO[sector];
+    ch.push(sH("SECTORAL THESIS ALIGNMENT — "+si.label.toUpperCase()));ch.push(sp2(30));
+    ch.push(pp2("Growth Catalysts",{bold:true,size:19,color:GREEN,before:40,after:20}));
+    si.catalysts.forEach(c=>ch.push(pp2("• "+c,{size:17,before:15,after:15})));
+    ch.push(sp2(20));
+    ch.push(pp2("Risk Factors",{bold:true,size:19,color:RED,before:40,after:20}));
+    si.risks.forEach(r=>ch.push(pp2("• "+r,{size:17,before:15,after:15})));
+    ch.push(sp2(20));
+    ch.push(pp2([tr2("Quantitative focus: ",{bold:true,size:17}),tr2(si.quantFocus,{size:17})],{before:40,after:40,fill:LIGHT}));
+  }
+
+  // Competitors
+  if(peers.length>1){
+    ch.push(sH("COMPETITOR ANALYSIS"));ch.push(sp2(30));
+    ch.push(tbl2(["Company","P/E","ROE %","OPM %","Rev CAGR 3Y","D/E"],peers.map(p=>[p.name,p.pe,p.roe,p.opm,p.cagr3,p.de]),[2340,1080,1080,1080,1980,1800]));
+  }
+
+  // Strengths / Risks
+  ch.push(sH("STRENGTHS & RISKS"));ch.push(sp2(30));
+  ch.push(pp2("KEY STRENGTHS",{bold:true,size:20,color:GREEN,before:40,after:30}));
+  positives.forEach(p=>ch.push(pp2([tr2("+ "+p.t+"  ",{bold:true,size:19,color:GREEN}),tr2(p.d,{size:18})],{before:40,after:25})));
+  ch.push(sp2(40));
+  ch.push(pp2("KEY RISKS",{bold:true,size:20,color:RED,before:40,after:30}));
+  negatives.forEach(n=>ch.push(pp2([tr2("- "+n.t+"  ",{bold:true,size:19,color:RED}),tr2(n.d,{size:18})],{before:40,after:25})));
+
+  // Valuation
+  ch.push(sH("VALUATION FRAMEWORK"));ch.push(sp2(30));
+  ch.push(tbl2(["Method","Bull Case","Base Case","Bear Case"],[
+    ["P/E Method",valuation.pe.bull,valuation.pe.base,valuation.pe.bear],
+    ["EV/EBITDA",valuation.ev.bull,valuation.ev.base,valuation.ev.bear],
+    ["DCF (12% WACC)",valuation.dcf.bull,valuation.dcf.base,valuation.dcf.bear],
+  ],[2340,2340,2340,2340]));
+  ch.push(pp2(valuation.pe.note,{size:16,italic:true,before:40,after:40}));
+
+  if(grahamRes.applicable){
+    ch.push(pp2([tr2("Graham Defensive Number:  ",{bold:true,size:18}),tr2(`₹${grahamRes.value}  vs CMP ₹${grahamRes.cmp}  →  Margin of Safety ${sign(grahamRes.marginOfSafety)}${grahamRes.marginOfSafety}%`,{size:18})],{before:60,after:20}));
+    ch.push(pp2(grahamRes.verdict+(grahamRes.reducedApplicability?" (note: reduced relevance for asset-light names in this sector — book value understates intangible worth).":"."),{size:15,italic:true,before:0,after:40}));
+  } else {
+    ch.push(pp2("Graham Number: Not Applicable — "+grahamRes.note,{size:16,italic:true,before:40,after:40}));
+  }
+
+  // Strategy
+  ch.push(sH("MULTI-HORIZON INVESTMENT STRATEGY"));ch.push(sp2(30));
+  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:[1440,1800,2160,3960],rows:[
+    new TableRow({children:[thc2("Horizon",1440),thc2("Rating",1800),thc2("Target",2160),thc2("Upside from CMP",3960)]}),
+    ...strategy.map((s,i)=>new TableRow({children:[tc2(s.label,{w:1440,bold:true,fill:i%2===1?GRAY:WHITE}),tc2(s.rating,{w:1800,bold:true,color:rC(s.rating),fill:i%2===1?GRAY:WHITE}),tc2(s.target,{w:2160,align:AlignmentType.RIGHT,fill:i%2===1?GRAY:WHITE}),tc2(s.upside,{w:3960,fill:i%2===1?GRAY:WHITE})]}))
+  ]}));
+
+  // Disclaimer
+  ch.push(sp2(80));
+  ch.push(pp2("DISCLAIMER: This report is for informational purposes only and does not constitute financial advice. Investing involves risk. Consult a SEBI-registered advisor. Data from screener.in. Altman Z/Z''-Score, Ohlson O-Score, DuPont and Graham Number are academic models applied programmatically to exported data — they are decision-support inputs, not standalone verdicts, and should be read alongside qualitative research.",{size:15,italic:true,color:"888888"}));
+
+  const doc2=new Document({
+    numbering:{config:[{reference:"bullets",levels:[{level:0,format:LevelFormat.BULLET,text:"•",alignment:AlignmentType.LEFT,style:{paragraph:{indent:{left:540,hanging:280}}}}]}]},
+    styles:{default:{document:{run:{font:"Arial",size:19}}}},
+    sections:[{properties:{page:{size:{width:12240,height:15840},margin:{top:800,right:900,bottom:800,left:900}}},children:ch}]
+  });
+  return await Packer.toBlob(doc2);
+}
+
+function dlDocx(blob,name){
+  if(!blob){showErr('Error: the Word report was not built successfully - please regenerate the report and try downloading again.');return;}
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=(name||'Company').replace(/[^a-zA-Z0-9]/g,'_')+'_Research_Report.docx';
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  // Revoking immediately can race the browser actually starting to read the
+  // blob in some browsers, producing an empty or failed download - give it a
+  // moment before cleaning up.
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+function setStep(n){for(let i=1;i<=3;i++){const el=document.getElementById('step'+i);el.className='step';if(i<n)el.className='step done';if(i===n)el.className='step active';}}
+function showErr(msg){const el=document.getElementById('err-box');el.textContent=msg;el.style.display='block';}
+function hideErr(){document.getElementById('err-box').style.display='none';}
+function doReset(){
+  files={xlsx:null,pdf1:null,pdf2:null};docxBlob=null;logLines=[];
+  ['xlsx','pdf1','pdf2'].forEach(t=>{
+    const fi=document.getElementById('f-'+t);if(fi)fi.value='';
+    document.getElementById('fn-'+t).textContent='';
+    document.getElementById('dz-'+t).classList.remove('ready');
+  });
+  document.getElementById('dz-xlsx').classList.add('mandatory');
+  document.getElementById('gen-btn').disabled=true;
+  document.getElementById('res-card').style.display='none';
+  document.getElementById('prog-card').style.display='none';
+  document.getElementById('upload-card').style.display='block';
+  document.getElementById('pbar').style.width='0%';
+  document.getElementById('plog').innerHTML='';
+  document.getElementById('sector-select').value='general';
+  setStep(1);hideErr();
+  for(let i=1;i<=4;i++){document.getElementById('p'+i+'n').value='';document.getElementById('p'+i+'d').value='';}
+}
+
+// Drag-and-drop
+['xlsx','pdf1','pdf2'].forEach(t=>{
+  const dz=document.getElementById('dz-'+t);
+  dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
+  dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+  dz.addEventListener('drop',e=>{
+    e.preventDefault();dz.classList.remove('dragover');
+    const f=e.dataTransfer.files[0];
+    if(!f)return;
+    const inp=document.getElementById('f-'+t);
+    const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;
+    onFile(t,inp);
+  });
+});
+</script>
+</body>
+</html>
