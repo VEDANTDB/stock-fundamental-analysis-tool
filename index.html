@@ -76,7 +76,7 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .card-title{font-family:'DM Serif Display',serif;font-size:1.15rem;color:var(--navy);margin-bottom:.25rem}
 .card-sub{font-size:.8rem;color:var(--muted);margin-bottom:1.25rem}
 /* upload */
-.upload-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.875rem;margin-bottom:1rem}
+.upload-row{display:grid;grid-template-columns:repeat(4,1fr);gap:.875rem;margin-bottom:1rem}
 .drop-zone{border:2px dashed var(--border);border-radius:10px;padding:1.25rem;text-align:center;cursor:pointer;transition:all .2s;position:relative;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .drop-zone:hover,.drop-zone.dragover{border-color:var(--accent);background:#f0f7ff}
 .drop-zone.ready{border-color:var(--green);border-style:solid;background:var(--lgreen)}
@@ -200,7 +200,8 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .thesis-col li{font-size:.78rem;line-height:1.6;margin-bottom:.35rem;color:var(--text)}
 .thesis-focus{font-size:.78rem;background:#fff;border-left:3px solid var(--accent);padding:.7rem .85rem;border-radius:0 6px 6px 0;line-height:1.6}
 @media(max-width:700px){
-  .upload-row,.peers-grid,.scores-grid,.ratings-strip,.pos-neg,.val-grid,.filter-funnel,.diag-grid,.thesis-grid{grid-template-columns:1fr 1fr}
+  .upload-row{grid-template-columns:1fr 1fr}
+  .peers-grid,.scores-grid,.ratings-strip,.pos-neg,.val-grid,.filter-funnel,.diag-grid,.thesis-grid{grid-template-columns:1fr 1fr}
   .steps{flex-direction:column}
   .step{border-right:none;border-bottom:1px solid var(--border)}
 }
@@ -248,6 +249,13 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
         <div class="dz-lbl">screener.in Excel</div>
         <div class="dz-hint">Mandatory · .xlsx</div>
         <div class="dz-file" id="fn-xlsx"></div>
+      </div>
+      <div class="drop-zone" id="dz-peers">
+        <input type="file" accept=".xlsx,.xls" id="f-peers" multiple onchange="onFile('peers',this)">
+        <div class="dz-icon">🏢</div>
+        <div class="dz-lbl">Competitor Excels</div>
+        <div class="dz-hint">Optional · Select multiple</div>
+        <div class="dz-file" id="fn-peers"></div>
       </div>
       <div class="drop-zone" id="dz-pdf1">
         <input type="file" accept=".pdf" id="f-pdf1" onchange="onFile('pdf1',this)">
@@ -301,7 +309,7 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
     </div>
 
     <div class="peers-wrap">
-      <div class="peers-lbl">Competitors (optional — enter name and key metrics for peer table)</div>
+      <div class="peers-lbl">Manual Competitors (optional — use file upload above for full analysis, or enter basic metrics here)</div>
       <div class="peers-grid">
         <div class="peer-group"><label>Peer 1 Name</label><input type="text" id="p1n" placeholder="e.g. Kellton Tech"></div>
         <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p1d" placeholder="72x · 8% · 7%"></div>
@@ -338,11 +346,19 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 
 <script>
 // ─── State ────────────────────────────────────────────────────────────────────
-let files={xlsx:null,pdf1:null,pdf2:null};
+let files={xlsx:null,pdf1:null,pdf2:null,peers:[]};
 let docxBlob=null;
 let logLines=[];
 
 function onFile(type,inp){
+  if(type==='peers'){
+    const fs = inp.files;
+    if(!fs || fs.length===0) return;
+    files.peers = Array.from(fs);
+    document.getElementById('dz-peers').classList.add('ready');
+    document.getElementById('fn-peers').textContent = fs.length + ' file(s) selected';
+    return;
+  }
   const f=inp.files[0]; if(!f)return;
   files[type]=f;
   document.getElementById('dz-'+type).classList.add('ready');
@@ -718,6 +734,7 @@ function buildVal(m,a,bs){
   }
   const f=v=>v?'₹'+v.toLocaleString('en-IN'):'—';
   return{
+    evMult,
     pe:{bull:`${f(tp(epsFY2Bull,peBull))} (${peBull}x)`,base:`${f(tp(epsFY2Base,peB))} (${peB}x)`,bear:`${f(tp(epsFY2Bear,peBear))} (${peBear}x)`,note:`FY+2E EPS — Bull ₹${epsFY2Bull}, Base ₹${epsFY2Base}, Bear ₹${epsFY2Bear}`},
     ev:{bull:f(evTp(evBull)),base:f(evTp(evBase2)),bear:f(evTp(evBear)),note:`Current EV/EBITDA ~${evMult}x`},
     dcf:{bull:f(dcf.bull),base:f(dcf.base),bear:f(dcf.bear),note:'12% WACC, 4% terminal growth, 5Y explicit'},
@@ -965,14 +982,48 @@ function buildNegatives(sc,m,a,bs,cf,zRes,oRes,duRes){
   return res.slice(0,8);
 }
 
-function buildPeers(m,a){
-  const pe=safe(m.trailingPE),opm=safe(last(a.opm)),sc3=safe(a.salesCagr3);
-  const subj={name:m.companyName+' ✦',pe:pe?pe.toFixed(1)+'x':'—',roe:'—',opm:opm.toFixed(1)+'%',cagr3:sc3?sc3+'%':'—',de:'—',highlight:true};
+function buildPeers(m,a,bs,subjVal,peerData){
+  const pe = safe(m.trailingPE), opm = safe(last(a.opm)), sc3 = safe(a.salesCagr3);
+  const roe = safe(last(bs.roe)), de = safe(last(bs.deRatio)), pb = safe(m.trailingPB);
+  const eveb = subjVal.evMult ? subjVal.evMult.toFixed(1)+'x' : '—';
+  
+  const subj={name:m.companyName+' ✦', pe:pe?pe.toFixed(1)+'x':'—', pb:pb?pb.toFixed(1)+'x':'—', eveb, roe:roe?roe.toFixed(1)+'%':'—', opm:opm?opm.toFixed(1)+'%':'—', cagr3:sc3?sc3+'%':'—', de:de?de.toFixed(2)+'x':'—', highlight:true};
   const peers=[subj];
+  
+  // Auto peers from file
+  if (peerData && peerData.length > 0) {
+      peerData.forEach(pd => {
+          const p_pe = safe(pd.meta.trailingPE);
+          const p_pb = safe(pd.meta.trailingPB);
+          const p_opm = safe(last(pd.annual.opm));
+          const p_sc3 = safe(pd.annual.salesCagr3);
+          const p_roe = safe(last(pd.balanceSheet.roe));
+          const p_de = safe(last(pd.balanceSheet.deRatio));
+          const p_val = buildVal(pd.meta, pd.annual, pd.balanceSheet);
+          const p_eveb = p_val.evMult ? p_val.evMult.toFixed(1)+'x' : '—';
+          
+          peers.push({
+              name: pd.meta.companyName,
+              pe: p_pe ? p_pe.toFixed(1)+'x' : '—',
+              pb: p_pb ? p_pb.toFixed(1)+'x' : '—',
+              eveb: p_eveb,
+              roe: p_roe ? p_roe.toFixed(1)+'%' : '—',
+              opm: p_opm ? p_opm.toFixed(1)+'%' : '—',
+              cagr3: p_sc3 ? p_sc3+'%' : '—',
+              de: p_de ? p_de.toFixed(2)+'x' : '—',
+              highlight: false
+          });
+      });
+  }
+
+  // Manual peers (if any)
   for(let i=1;i<=4;i++){
     const nm=document.getElementById('p'+i+'n')?.value?.trim();
     const dt=document.getElementById('p'+i+'d')?.value?.trim();
-    if(nm){const pts=dt?dt.split('·').map(s=>s.trim()):[];peers.push({name:nm,pe:pts[0]||'—',roe:pts[1]||'—',opm:pts[2]||'—',cagr3:'—',de:'—',highlight:false});}
+    if(nm){
+        const pts=dt?dt.split('·').map(s=>s.trim()):[];
+        peers.push({name:nm, pe:pts[0]||'—', pb:'—', eveb:'—', roe:pts[1]||'—', opm:pts[2]||'—', cagr3:'—', de:'—', highlight:false});
+    }
   }
   return peers;
 }
@@ -1008,6 +1059,21 @@ async function generate(){
 
     await log('Parsing financial data from screener.in format...',20);
     const data=parseExcel(arr);
+    
+    const peerData = [];
+    if (files.peers && files.peers.length > 0) {
+        await log('Parsing competitor files...', 25);
+        for (const pf of files.peers) {
+            try {
+                const pBuf = await pf.arrayBuffer();
+                const pArr = new Uint8Array(pBuf);
+                const pParsed = parseExcel(pArr);
+                peerData.push(pParsed);
+            } catch(e) {
+                console.warn("Failed to parse peer file", pf.name, e);
+            }
+        }
+    }
 
     await log('Running 8-dimension scoring engine...',34);
     const scores={
@@ -1040,7 +1106,7 @@ async function generate(){
     const strategy=buildStrategy(ratings,data.meta,data.annual);
     const positives=buildPositives(scores,data.meta,data.annual,data.balanceSheet,data.cashFlow,zRes,oRes,duRes);
     const negatives=buildNegatives(scores,data.meta,data.annual,data.balanceSheet,data.cashFlow,zRes,oRes,duRes);
-    const peers=buildPeers(data.meta,data.annual);
+    const peers=buildPeers(data.meta,data.annual,data.balanceSheet,valuation,peerData);
     data.annual.balanceSheet=data.balanceSheet;
 
     const fd={data,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector,qualMgmt,qualEsg};
@@ -1201,9 +1267,9 @@ function renderResults(fd){
   }
 
   if(peers.length>1){
-    h+=`<div class="sec-label">Competitor Analysis</div>`;
-    h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Company</th><th>P/E</th><th>ROE %</th><th>OPM %</th><th>Rev CAGR 3Y</th><th>D/E</th></tr></thead><tbody>`;
-    peers.forEach(p=>{const bg=p.highlight?'background:var(--light)':'';h+=`<tr style="${bg}"><td style="${p.highlight?'color:var(--accent);font-weight:600':''}">${p.name}</td><td>${p.pe}</td><td>${p.roe}</td><td>${p.opm}</td><td>${p.cagr3}</td><td>${p.de}</td></tr>`;});
+    h+=`<div class="sec-label">Detailed Competitor Analysis</div>`;
+    h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Company</th><th>P/E</th><th>P/B</th><th>EV/EBITDA</th><th>ROE %</th><th>OPM %</th><th>Rev CAGR 3Y</th><th>D/E</th></tr></thead><tbody>`;
+    peers.forEach(p=>{const bg=p.highlight?'background:var(--light)':'';h+=`<tr style="${bg}"><td style="${p.highlight?'color:var(--accent);font-weight:600':''}">${p.name}</td><td>${p.pe}</td><td>${p.pb}</td><td>${p.eveb}</td><td>${p.roe}</td><td>${p.opm}</td><td>${p.cagr3}</td><td>${p.de}</td></tr>`;});
     h+=`</tbody></table></div>`;
   }
 
@@ -1343,8 +1409,8 @@ async function buildDocx(fd){
   }
 
   if(peers.length>1){
-    ch.push(sH("COMPETITOR ANALYSIS"));ch.push(sp2(30));
-    ch.push(tbl2(["Company","P/E","ROE %","OPM %","Rev CAGR 3Y","D/E"],peers.map(p=>[p.name,p.pe,p.roe,p.opm,p.cagr3,p.de]),[2340,1080,1080,1080,1980,1800]));
+    ch.push(sH("DETAILED COMPETITOR ANALYSIS"));ch.push(sp2(30));
+    ch.push(tbl2(["Company","P/E","P/B","EV/EBITDA","ROE %","OPM %","Rev CAGR 3Y","D/E"],peers.map(p=>[p.name,p.pe,p.pb,p.eveb,p.roe,p.opm,p.cagr3,p.de]),[2000,900,900,1200,900,900,1500,1060]));
   }
 
   ch.push(sH("STRENGTHS & RISKS"));ch.push(sp2(30));
@@ -1401,8 +1467,8 @@ function showErr(msg){const el=document.getElementById('err-box');el.textContent
 function hideErr(){document.getElementById('err-box').style.display='none';}
 function setStep(n){for(let i=1;i<=3;i++){const el=document.getElementById('step'+i);el.className='step';if(i<n)el.className='step done';if(i===n)el.className='step active';}}
 function doReset(){
-  files={xlsx:null,pdf1:null,pdf2:null};docxBlob=null;logLines=[];
-  ['xlsx','pdf1','pdf2'].forEach(t=>{
+  files={xlsx:null,pdf1:null,pdf2:null,peers:[]};docxBlob=null;logLines=[];
+  ['xlsx','pdf1','pdf2','peers'].forEach(t=>{
     const fi=document.getElementById('f-'+t);if(fi)fi.value='';
     document.getElementById('fn-'+t).textContent='';
     document.getElementById('dz-'+t).classList.remove('ready');
@@ -1421,7 +1487,7 @@ function doReset(){
   for(let i=1;i<=4;i++){document.getElementById('p'+i+'n').value='';document.getElementById('p'+i+'d').value='';}
 }
 
-['xlsx','pdf1','pdf2'].forEach(t=>{
+['xlsx','pdf1','pdf2','peers'].forEach(t=>{
   const dz=document.getElementById('dz-'+t);
   dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
   dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
@@ -1430,7 +1496,13 @@ function doReset(){
     const f=e.dataTransfer.files[0];
     if(!f)return;
     const inp=document.getElementById('f-'+t);
-    const dt=new DataTransfer();dt.items.add(f);inp.files=dt.files;
+    const dt=new DataTransfer();
+    if(t==='peers') {
+        for(let fi of e.dataTransfer.files) dt.items.add(fi);
+    } else {
+        dt.items.add(f);
+    }
+    inp.files=dt.files;
     onFile(t,inp);
   });
 });
