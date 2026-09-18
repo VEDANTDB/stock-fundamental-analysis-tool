@@ -3,18 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Research Agent Pro</title>
+<title>Equity Research Suite</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230f2444'/%3E%3Cpath d='M20 65 L40 45 L55 58 L80 30' stroke='%2360a5fa' stroke-width='8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0f2444">
 <script>
-// A single blocking <script src> has no recovery path if that one CDN is
-// slow, blocked by a network policy/ad-blocker, or transiently down - which
-// is exactly what produced "docx library failed to load" for some users
-// even though the URL itself is valid. This loads xlsx.js and docx.js
-// dynamically with an independently-hosted fallback per library (verified
-// working: jsdelivr mirrors both npm packages) and a real timeout on each
-// attempt, and exposes a promise per library that the app awaits up front -
-// so a load failure is caught in ~9s with a clear message, instead of
-// silently surfacing only after the user has waited through the whole
-// analysis pipeline. Neither call blocks page rendering.
+// Robust, fallback-aware CDN loader shared by both modes.
 function __loadScript(url,timeoutMs){
   return new Promise((resolve,reject)=>{
     const s=document.createElement('script');
@@ -28,10 +21,7 @@ function __loadScript(url,timeoutMs){
 }
 async function __loadWithFallback(urls,timeoutMs){
   let lastErr;
-  for(const url of urls){
-    try{ await __loadScript(url,timeoutMs); return url; }
-    catch(e){ lastErr=e; }
-  }
+  for(const url of urls){ try{ await __loadScript(url,timeoutMs); return url; } catch(e){ lastErr=e; } }
   throw lastErr||new Error('all sources failed');
 }
 window.__xlsxReady=__loadWithFallback([
@@ -52,15 +42,64 @@ window.__docxReady=__loadWithFallback([
   --text:#0f172a;--muted:#64748b;--white:#ffffff;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-height:100vh}
-.topbar{background:var(--navy);padding:1.25rem 2rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
-.topbar-title{font-family:'DM Serif Display',serif;font-size:1.5rem;color:#fff}
+html{scroll-behavior:smooth}
+body{font-family:'DM Sans',sans-serif;background:#eef1f6;color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+::selection{background:#bfdbfe;color:var(--navy)}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+button,input,select{font-family:inherit}
+
+/* ── Top bar + mode tabs ─────────────────────────────────────────────── */
+.topbar{background:linear-gradient(155deg,var(--navy) 0%,#132c52 60%,#0d1f3d 100%);padding:1.15rem 2rem 0;display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;box-shadow:0 2px 10px rgba(9,20,40,.25);position:relative;z-index:5}
+.topbar-title{font-family:'DM Serif Display',serif;font-size:1.55rem;color:#fff;letter-spacing:.2px}
 .topbar-title span{color:#60a5fa}
-.topbar-title .pro-tag{font-size:.68rem;font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:.08em;color:var(--navy);background:#60a5fa;padding:2px 7px;border-radius:5px;vertical-align:middle;margin-left:4px}
-.topbar-sub{font-size:.78rem;color:#93c5fd;margin-top:2px}
-.topbar-badge{margin-left:auto;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#bfdbfe;font-size:.72rem;padding:4px 12px;border-radius:20px}
-.page{max-width:1060px;margin:0 auto;padding:1.75rem 1.25rem}
-/* steps */
+.topbar-sub{font-size:.78rem;color:#93c5fd;margin-top:3px}
+.topbar-badge{margin-left:auto;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:#bfdbfe;font-size:.7rem;padding:5px 13px;border-radius:20px;align-self:flex-start;margin-top:2px;letter-spacing:.02em}
+.mode-tabs{display:flex;gap:.25rem;width:100%;margin-top:1.15rem;border-top:1px solid rgba(255,255,255,.08);padding-top:0}
+.mode-tab{position:relative;background:none;border:none;color:#93c5fd;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;padding:.8rem 1.2rem .7rem;border-radius:8px 8px 0 0;cursor:pointer;display:flex;align-items:center;gap:.55rem;opacity:.6;transition:opacity .15s,background .15s}
+.mode-tab:hover{opacity:1;background:rgba(255,255,255,.05)}
+.mode-tab.active{opacity:1;background:#eef1f6;color:var(--navy)}
+.mode-tab .icon{font-size:1.05rem}
+.mode-tab::after{content:'';position:absolute;left:14px;right:14px;bottom:-1px;height:2px;background:var(--accent);border-radius:2px 2px 0 0;opacity:0;transition:opacity .15s}
+.mode-tab.active::after{opacity:0}
+
+.page{max-width:1100px;margin:0 auto;padding:1.75rem 1.25rem}
+.mode-panel{display:none}
+.mode-panel.active{display:block;animation:fadeIn .25s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Cards / shared building blocks ──────────────────────────────────── */
+.card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:1.75rem;margin-bottom:1.25rem;box-shadow:0 1px 2px rgba(15,36,68,.04),0 6px 18px -10px rgba(15,36,68,.10)}
+.card-title{font-family:'DM Serif Display',serif;font-size:1.15rem;color:var(--navy);margin-bottom:.25rem}
+.card-sub{font-size:.8rem;color:var(--muted);margin-bottom:1.25rem}
+.sec-label{font-family:'DM Serif Display',serif;font-size:.975rem;color:var(--navy);margin:1.4rem 0 .65rem;padding-bottom:.35rem;border-bottom:2px solid var(--light)}
+.banner{background:var(--lamber);border:1px solid #fbbf24;color:#78350f;padding:.7rem 1rem;border-radius:8px;font-size:.78rem;margin-bottom:1rem;line-height:1.5}
+.banner.info{background:var(--light);border-color:#93c5fd;color:var(--navy)}
+.warn-box{background:var(--lamber);border:1px solid #fbbf24;color:#78350f;padding:.85rem 1rem;border-radius:8px;font-size:.8rem;margin-bottom:1.1rem;line-height:1.55}
+.err{background:var(--lred);border:1px solid #fca5a5;color:#7f1d1d;padding:.875rem 1rem;border-radius:8px;font-size:.82rem;margin-top:.875rem;display:none}
+.tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:500;margin:2px}
+.tag-g{background:var(--lgreen);color:#14532d}
+.tag-r{background:var(--lred);color:#7f1d1d}
+.tag-a{background:var(--lamber);color:#78350f}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.gen-btn{width:100%;padding:.9rem;background:var(--navy);color:#fff;border:none;border-radius:10px;font-size:.9rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:1.25rem;transition:background .15s,transform .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;gap:.5rem;box-shadow:0 1px 2px rgba(15,36,68,.15)}
+.gen-btn:hover:not(:disabled){background:var(--blue);transform:translateY(-1px);box-shadow:0 6px 16px -6px rgba(26,60,110,.5)}
+.gen-btn:active:not(:disabled){transform:translateY(0)}
+.gen-btn:disabled{background:#cbd5e1;color:#94a3b8;cursor:not-allowed;box-shadow:none}
+.dl-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.7rem 1.5rem;background:var(--green);color:#fff;border:none;border-radius:9px;cursor:pointer;font-size:.875rem;font-weight:600;font-family:'DM Sans',sans-serif;margin-top:1.25rem;transition:background .15s,transform .15s,box-shadow .15s;box-shadow:0 1px 2px rgba(21,128,61,.2)}
+.dl-btn:hover:not(:disabled){background:#166534;transform:translateY(-1px);box-shadow:0 6px 16px -6px rgba(21,128,61,.55)}
+.dl-btn:disabled{background:#cbd5e1;color:#94a3b8;cursor:not-allowed;box-shadow:none;transform:none}
+.reset-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.7rem 1.1rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:9px;cursor:pointer;font-size:.82rem;font-family:'DM Sans',sans-serif;margin-top:1.25rem;margin-left:.65rem;transition:all .15s}
+.reset-btn:hover{background:var(--gray);color:var(--text);border-color:#cbd5e1}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{text-align:center;padding:2.25rem 1.5rem;border:1.5px dashed var(--border);border-radius:12px;margin:1rem 0;background:var(--gray)}
+.empty-icon{font-size:1.8rem;margin-bottom:.5rem;opacity:.7}
+.empty-title{font-size:.9rem;font-weight:600;color:var(--navy);margin-bottom:.3rem}
+.empty-sub{font-size:.78rem;color:var(--muted);max-width:440px;margin:0 auto;line-height:1.55}
+
+/* ── Steps (single-stock flow) ───────────────────────────────────────── */
 .steps{display:flex;background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:1.5rem}
 .step{flex:1;padding:.875rem 1rem;display:flex;align-items:center;gap:.6rem;border-right:1px solid var(--border);opacity:.35;transition:opacity .3s}
 .step:last-child{border-right:none}
@@ -71,11 +110,8 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .step.done .step-num{background:var(--green);color:#fff}
 .step-lbl{font-size:.78rem;font-weight:500}
 .step-sub{font-size:.7rem;color:var(--muted);margin-top:1px}
-/* card */
-.card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:1.75rem;margin-bottom:1.25rem}
-.card-title{font-family:'DM Serif Display',serif;font-size:1.15rem;color:var(--navy);margin-bottom:.25rem}
-.card-sub{font-size:.8rem;color:var(--muted);margin-bottom:1.25rem}
-/* upload */
+
+/* ── Upload / fetch controls (shared look) ───────────────────────────── */
 .upload-row{display:grid;grid-template-columns:repeat(4,1fr);gap:.875rem;margin-bottom:1rem}
 .drop-zone{border:2px dashed var(--border);border-radius:10px;padding:1.25rem;text-align:center;cursor:pointer;transition:all .2s;position:relative;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .drop-zone:hover,.drop-zone.dragover{border-color:var(--accent);background:#f0f7ff}
@@ -86,30 +122,35 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .dz-lbl{font-size:.78rem;font-weight:600}
 .dz-hint{font-size:.69rem;color:var(--muted);margin-top:2px}
 .dz-file{font-size:.69rem;color:var(--green);font-weight:500;margin-top:4px;word-break:break-all;max-width:100%}
-/* sector */
+.add-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.add-box{border:2px dashed var(--border);border-radius:10px;padding:1.1rem;position:relative}
+.add-box h4{font-size:.8rem;margin-bottom:.5rem;color:var(--navy)}
+.add-box input[type=file]{width:100%;font-size:.75rem}
+.fetch-row{display:flex;gap:.5rem}
+.fetch-row input{flex:1;padding:.55rem .7rem;border:1px solid var(--border);border-radius:7px;font-size:.8rem;transition:border-color .15s}
+.fetch-row input:focus{border-color:var(--accent)}
+.fetch-row button{padding:.55rem 1.1rem;background:var(--accent);color:#fff;border:none;border-radius:7px;font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s}
+.fetch-row button:hover:not(:disabled){background:var(--blue)}
+.fetch-row button:disabled{background:#94a3b8;cursor:not-allowed}
+.hint{font-size:.68rem;color:var(--muted);margin-top:.4rem;line-height:1.5}
+.tabmini{display:flex;gap:.4rem;margin-bottom:.9rem}
+.tabmini button{flex:1;padding:.5rem;border:1px solid var(--border);background:#fff;border-radius:7px;font-size:.75rem;font-weight:600;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif}
+.tabmini button.active{background:var(--navy);color:#fff;border-color:var(--navy)}
+
+/* ── Sector / qualitative / peers (single-stock) ─────────────────────── */
 .sector-row{margin-top:1.1rem}
 .sector-row label{font-size:.78rem;font-weight:600;display:block;margin-bottom:.45rem}
 .sector-row select{width:100%;padding:.7rem .85rem;border:1px solid var(--border);border-radius:8px;font-size:.82rem;font-family:'DM Sans',sans-serif;outline:none;background:#fff;cursor:pointer;color:var(--text)}
 .sector-row select:focus{border-color:var(--accent)}
 .sector-hint{font-size:.7rem;color:var(--muted);margin-top:5px;line-height:1.5}
-/* peers */
 .peers-wrap{margin-top:1.1rem}
 .peers-lbl{font-size:.78rem;font-weight:600;margin-bottom:.65rem}
 .peers-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem}
 .peer-group label{font-size:.69rem;color:var(--muted);display:block;margin-bottom:3px}
 .peer-group input, .peer-group select{width:100%;padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:.78rem;font-family:'DM Sans',sans-serif;outline:none;transition:border-color .2s;background:#fff;}
 .peer-group input:focus, .peer-group select:focus{border-color:var(--accent)}
-/* buttons */
-.gen-btn{width:100%;padding:.875rem;background:var(--navy);color:#fff;border:none;border-radius:9px;font-size:.9rem;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;margin-top:1.25rem;transition:background .2s;display:flex;align-items:center;justify-content:center;gap:.5rem}
-.gen-btn:hover{background:var(--blue)}
-.gen-btn:disabled{background:var(--muted);cursor:not-allowed}
-.dl-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.7rem 1.5rem;background:var(--green);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:.875rem;font-weight:600;font-family:'DM Sans',sans-serif;margin-top:1.25rem;transition:background .2s}
-.dl-btn:hover{background:#166534}
-.reset-btn{display:inline-flex;align-items:center;gap:.5rem;padding:.7rem 1.1rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:.82rem;font-family:'DM Sans',sans-serif;margin-top:1.25rem;margin-left:.65rem;transition:all .2s}
-.reset-btn:hover{background:var(--gray);color:var(--text)}
-/* error */
-.err{background:var(--lred);border:1px solid #fca5a5;color:#7f1d1d;padding:.875rem 1rem;border-radius:8px;font-size:.82rem;margin-top:.875rem;display:none}
-/* progress */
+
+/* ── Progress ─────────────────────────────────────────────────────────── */
 .prog-title{font-size:.875rem;font-weight:600;color:var(--navy);margin-bottom:.875rem}
 .pbar-wrap{height:5px;background:var(--border);border-radius:3px;margin-bottom:.65rem;overflow:hidden}
 .pbar{height:100%;background:var(--accent);border-radius:3px;width:0%;transition:width .35s ease}
@@ -117,8 +158,9 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .plog-line{display:flex;align-items:center;gap:.4rem}
 .plog-line.done{color:var(--green)}
 .plog-line.cur{color:var(--accent);font-weight:500}
-/* results */
-.sec-label{font-family:'DM Serif Display',serif;font-size:.975rem;color:var(--navy);margin:1.4rem 0 .65rem;padding-bottom:.35rem;border-bottom:2px solid var(--light)}
+.progress-log{font-size:.75rem;color:var(--muted);line-height:1.9;margin-top:.75rem}
+
+/* ── Results: scorecards / ratings / tables ──────────────────────────── */
 .scores-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.65rem;margin:.75rem 0}
 .score-box{background:var(--gray);border-radius:8px;padding:.7rem;text-align:center}
 .score-name{font-size:.67rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
@@ -149,16 +191,14 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .val-base{font-size:.78rem;color:var(--blue);margin-bottom:2px}
 .val-bear{font-size:.78rem;color:var(--red)}
 .val-note{font-size:.67rem;color:var(--muted);margin-top:5px}
-.tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:500;margin:2px}
-.tag-g{background:var(--lgreen);color:#14532d}
-.tag-r{background:var(--lred);color:#7f1d1d}
-.tag-a{background:var(--lamber);color:#78350f}
 .company-banner{background:var(--navy);border-radius:10px;padding:1.35rem 1.5rem;margin-bottom:1.25rem;color:#fff}
 .cb-name{font-family:'DM Serif Display',serif;font-size:1.4rem}
 .cb-meta{font-size:.78rem;color:#93c5fd;margin-top:4px}
-/* NEW: bank warning */
-.warn-box{background:var(--lamber);border:1px solid #fbbf24;color:#78350f;padding:.85rem 1rem;border-radius:8px;font-size:.8rem;margin-bottom:1.1rem;line-height:1.55}
-/* NEW: 3-stage filter */
+.summary-banner{background:var(--navy);border-radius:10px;padding:1.35rem 1.5rem;margin-bottom:1.25rem;color:#fff;display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+.sb-item .l{font-size:.68rem;color:#93c5fd;text-transform:uppercase;letter-spacing:.03em}
+.sb-item .v{font-size:1.25rem;font-weight:700;margin-top:2px}
+
+/* ── 3-stage filter ───────────────────────────────────────────────────── */
 .filter-funnel{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin:.75rem 0}
 .filter-stage{border-radius:10px;padding:1rem;border:1.5px solid var(--border);background:var(--gray)}
 .filter-stage.pass{border-color:var(--green);background:var(--lgreen)}
@@ -169,18 +209,20 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .fs-verdict{font-size:.95rem;font-weight:700;margin:.2rem 0 .4rem}
 .fs-detail{font-size:.69rem;color:var(--muted);line-height:1.6}
 .filter-overall{text-align:center;font-size:.83rem;font-weight:600;padding:.7rem;border-radius:8px;background:var(--light);color:var(--navy);margin-top:.6rem}
-/* NEW: distress diagnostics */
-.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.875rem;margin:.75rem 0}
+
+/* ── Distress diagnostics ─────────────────────────────────────────────── */
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.875rem;margin:.75rem 0}
 .diag-box{border-radius:10px;padding:1.1rem;border:1px solid var(--border);background:var(--gray);border-left-width:4px}
 .diag-box.zone-safe{border-left-color:var(--green)}
 .diag-box.zone-grey{border-left-color:var(--amber)}
 .diag-box.zone-distress{border-left-color:var(--red)}
 .diag-name{font-size:.7rem;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.03em}
-.diag-val{font-size:1.55rem;font-weight:700;color:var(--navy);margin:.3rem 0}
+.diag-val{font-size:1.4rem;font-weight:700;color:var(--navy);margin:.25rem 0}
 .diag-zone{display:inline-block;padding:2px 10px;border-radius:20px;font-size:.7rem;font-weight:600}
 .diag-comp{font-size:.7rem;color:var(--muted);margin-top:.6rem;line-height:1.7}
 .diag-note{font-size:.68rem;color:var(--muted);font-style:italic;margin-top:.55rem;border-top:1px dashed var(--border);padding-top:.45rem;line-height:1.5}
-/* NEW: dupont chain */
+
+/* ── DuPont chain ─────────────────────────────────────────────────────── */
 .dupont-chain{display:flex;align-items:stretch;flex-wrap:wrap;gap:.4rem;margin:.9rem 0;font-size:.78rem}
 .dp-box{background:var(--gray);border:1px solid var(--border);border-radius:8px;padding:.6rem .5rem;text-align:center;flex:1;min-width:96px}
 .dp-name{font-size:.63rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px;line-height:1.3}
@@ -190,7 +232,8 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .dp-flag{margin-top:.65rem;padding:.7rem .85rem;border-radius:8px;font-size:.78rem;line-height:1.55}
 .dp-flag.warn{background:var(--lred);color:#7f1d1d}
 .dp-flag.ok{background:var(--lgreen);color:#14532d}
-/* NEW: sector thesis */
+
+/* ── Sector thesis ────────────────────────────────────────────────────── */
 .thesis-card{background:var(--gray);border-radius:10px;padding:1.15rem 1.3rem;margin:.75rem 0}
 .thesis-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;margin-bottom:.85rem}
 .thesis-col h5{font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;margin-bottom:.5rem}
@@ -199,11 +242,42 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 .thesis-col ul{padding-left:1.05rem}
 .thesis-col li{font-size:.78rem;line-height:1.6;margin-bottom:.35rem;color:var(--text)}
 .thesis-focus{font-size:.78rem;background:#fff;border-left:3px solid var(--accent);padding:.7rem .85rem;border-radius:0 6px 6px 0;line-height:1.6}
-@media(max-width:700px){
+
+/* ── Portfolio-specific: holdings list, heatmap, cards ───────────────── */
+.holdings-list{margin-top:1rem}
+.holding-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr auto auto;gap:.6rem;align-items:center;padding:.65rem .5rem;border-bottom:1px solid var(--border);font-size:.8rem}
+.holding-row.head{font-weight:600;color:var(--muted);font-size:.68rem;text-transform:uppercase;border-bottom:2px solid var(--navy)}
+.holding-row input{width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;font-size:.78rem}
+.hstatus{font-size:.68rem;padding:2px 8px;border-radius:20px;font-weight:600}
+.hstatus.ok{background:var(--lgreen);color:#14532d}
+.hstatus.err{background:var(--lred);color:#7f1d1d}
+.hstatus.pending{background:var(--lamber);color:#78350f}
+.rm-btn{background:none;border:none;color:var(--red);cursor:pointer;font-size:.9rem}
+.px-btn{background:none;border:1px dashed var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-size:.68rem;padding:3px 6px}
+.px-btn.has{border-color:var(--green);color:var(--green)}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:600}
+.badge-g{background:var(--lgreen);color:#14532d}
+.badge-a{background:var(--lamber);color:#78350f}
+.badge-r{background:var(--lred);color:#7f1d1d}
+.heatmap{display:grid;gap:2px;margin:.75rem 0}
+.hcell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:.65rem;border-radius:3px;color:#fff;font-weight:600}
+.corr-caption{font-size:.7rem;color:var(--muted);font-style:italic;margin-top:.4rem}
+.hcard{border:1px solid var(--border);border-radius:10px;margin-bottom:.6rem;overflow:hidden}
+.hcard-head{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;background:var(--gray);cursor:pointer}
+.hcard-head .nm{font-weight:600;font-size:.85rem}
+.hcard-head .meta{font-size:.75rem;color:var(--muted)}
+.hcard-body{padding:1rem;display:none}
+.hcard-body.open{display:block}
+
+@media(max-width:750px){
   .upload-row{grid-template-columns:1fr 1fr}
   .peers-grid,.scores-grid,.ratings-strip,.pos-neg,.val-grid,.filter-funnel,.diag-grid,.thesis-grid{grid-template-columns:1fr 1fr}
   .steps{flex-direction:column}
   .step{border-right:none;border-bottom:1px solid var(--border)}
+  .add-row{grid-template-columns:1fr}
+  .holding-row{grid-template-columns:1fr}
+  .summary-banner{grid-template-columns:1fr 1fr}
+  .mode-tabs{flex-wrap:wrap}
 }
 @media(max-width:480px){
   .upload-row,.pos-neg,.filter-funnel,.thesis-grid{grid-template-columns:1fr}
@@ -214,246 +288,322 @@ body{font-family:'DM Sans',sans-serif;background:#eef2f7;color:var(--text);min-h
 
 <div class="topbar">
   <div>
-    <div class="topbar-title">Stock<span>Research</span> Agent<span class="pro-tag">PRO</span></div>
-    <div class="topbar-sub">screener.in Excel → 8-Dimension Score + Altman Z · Ohlson O · DuPont · Graham → Full report</div>
+    <div class="topbar-title">Equity<span>Research</span> Suite</div>
+    <div class="topbar-sub">screener.in Excel or live fetch → 8-dimension score, Altman Z, Ohlson O, DuPont, Graham Number → single-stock report or full portfolio roll-up</div>
   </div>
   <div class="topbar-badge">No API · No Server · 100% Local</div>
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tab-single" onclick="switchMode('single')"><span class="icon">📈</span> Single Stock Deep-Dive</button>
+    <button class="mode-tab" id="tab-portfolio" onclick="switchMode('portfolio')"><span class="icon">🗂️</span> Portfolio Analysis</button>
+  </div>
 </div>
 
 <div class="page">
 
-  <div class="steps" id="steps">
-    <div class="step active" id="step1">
-      <div class="step-num">1</div>
-      <div><div class="step-lbl">Upload Excel</div><div class="step-sub">screener.in export</div></div>
-    </div>
-    <div class="step" id="step2">
-      <div class="step-num">2</div>
-      <div><div class="step-lbl">Analysing</div><div class="step-sub">Scoring + risk models</div></div>
-    </div>
-    <div class="step" id="step3">
-      <div class="step-num">3</div>
-      <div><div class="step-lbl">Download</div><div class="step-sub">Word report ready</div></div>
-    </div>
-  </div>
+  <!-- ══════════════════════════════════════════════════════════════════
+       MODE: SINGLE STOCK DEEP-DIVE
+  ══════════════════════════════════════════════════════════════════ -->
+  <div class="mode-panel active" id="mode-single">
 
-  <!-- UPLOAD -->
-  <div class="card" id="upload-card">
-    <div class="card-title">Upload Your Files</div>
-    <div class="card-sub">Download the Excel from screener.in → search company → scroll down → "Export to Excel". PDFs and sector are optional.</div>
-
-    <div class="upload-row">
-      <div class="drop-zone mandatory" id="dz-xlsx">
-        <input type="file" accept=".xlsx,.xls" id="f-xlsx" onchange="onFile('xlsx',this)">
-        <div class="dz-icon">📊</div>
-        <div class="dz-lbl">screener.in Excel</div>
-        <div class="dz-hint">Mandatory · .xlsx</div>
-        <div class="dz-file" id="fn-xlsx"></div>
+    <div class="steps" id="s-steps">
+      <div class="step active" id="s-step1">
+        <div class="step-num">1</div>
+        <div><div class="step-lbl">Get Data</div><div class="step-sub">Upload Excel or fetch live</div></div>
       </div>
-      <div class="drop-zone" id="dz-peers">
-        <input type="file" accept=".xlsx,.xls" id="f-peers" multiple onchange="onFile('peers',this)">
-        <div class="dz-icon">🏢</div>
-        <div class="dz-lbl">Competitor Excels</div>
-        <div class="dz-hint">Optional · Select multiple</div>
-        <div class="dz-file" id="fn-peers"></div>
+      <div class="step" id="s-step2">
+        <div class="step-num">2</div>
+        <div><div class="step-lbl">Analysing</div><div class="step-sub">Scoring + risk models</div></div>
       </div>
-      <div class="drop-zone" id="dz-pdf1">
-        <input type="file" accept=".pdf" id="f-pdf1" onchange="onFile('pdf1',this)">
-        <div class="dz-icon">📄</div>
-        <div class="dz-lbl">Annual Report PDF</div>
-        <div class="dz-hint">Optional</div>
-        <div class="dz-file" id="fn-pdf1"></div>
-      </div>
-      <div class="drop-zone" id="dz-pdf2">
-        <input type="file" accept=".pdf" id="f-pdf2" onchange="onFile('pdf2',this)">
-        <div class="dz-icon">🎤</div>
-        <div class="dz-lbl">Earnings Transcript</div>
-        <div class="dz-hint">Optional</div>
-        <div class="dz-file" id="fn-pdf2"></div>
+      <div class="step" id="s-step3">
+        <div class="step-num">3</div>
+        <div><div class="step-lbl">Download</div><div class="step-sub">Word report ready</div></div>
       </div>
     </div>
 
-    <div class="sector-row">
-      <label>Sector (optional — sharpens which risk models apply &amp; unlocks sectoral thesis alignment)</label>
-      <select id="sector-select">
-        <option value="general">General / Diversified (default — Z''-Score, all models equal weight)</option>
-        <option value="banking">Banking &amp; Financial Services</option>
-        <option value="renewable">Renewable Energy, Power &amp; Infrastructure</option>
-        <option value="manufacturing">Manufacturing, Electronics &amp; Semiconductors</option>
-        <option value="healthcare">Healthcare &amp; Pharmaceuticals</option>
-        <option value="consumption">Consumption, Retail &amp; Digital Tech</option>
-      </select>
-      <div class="sector-hint">Leave on General if unsure — the tool still runs the full analysis, it just won't tailor the distress model or show sector catalysts/risks.</div>
-    </div>
+    <div class="card" id="s-upload-card">
+      <div class="card-title">Get Your Company Data</div>
+      <div class="card-sub">Upload the screener.in Excel export, or fetch the public company page directly by name/ticker. PDFs, sector and peers are optional.</div>
 
-    <div class="sector-row">
-      <label>Qualitative & ESG Assessment (optional)</label>
-      <div class="peers-grid" style="grid-template-columns: 1fr 1fr;">
-        <div class="peer-group">
-          <label>Management Quality</label>
-          <select id="qual-mgmt">
-            <option value="Strong">Strong</option>
-            <option value="Average" selected>Average</option>
-            <option value="Weak">Weak</option>
-          </select>
-        </div>
-        <div class="peer-group">
-          <label>ESG Risk</label>
-          <select id="qual-esg">
-            <option value="Low">Low</option>
-            <option value="Medium" selected>Medium</option>
-            <option value="High">High</option>
-          </select>
+      <div class="tabmini">
+        <button class="active" id="s-srctab-xlsx" onclick="sSetSourceTab('xlsx')">📊 Upload Excel</button>
+        <button id="s-srctab-fetch" onclick="sSetSourceTab('fetch')">🌐 Fetch from Screener.in (beta)</button>
+      </div>
+
+      <div id="s-src-xlsx">
+        <div class="upload-row">
+          <div class="drop-zone mandatory" id="s-dz-xlsx">
+            <input type="file" accept=".xlsx,.xls" id="s-f-xlsx" onchange="sOnFile('xlsx',this)">
+            <div class="dz-icon">📊</div>
+            <div class="dz-lbl">screener.in Excel</div>
+            <div class="dz-hint">.xlsx export</div>
+            <div class="dz-file" id="s-fn-xlsx"></div>
+          </div>
+          <div class="drop-zone" id="s-dz-peers">
+            <input type="file" accept=".xlsx,.xls" id="s-f-peers" multiple onchange="sOnFile('peers',this)">
+            <div class="dz-icon">🏢</div>
+            <div class="dz-lbl">Competitor Excels</div>
+            <div class="dz-hint">Optional · Select multiple</div>
+            <div class="dz-file" id="s-fn-peers"></div>
+          </div>
+          <div class="drop-zone" id="s-dz-pdf1">
+            <input type="file" accept=".pdf" id="s-f-pdf1" onchange="sOnFile('pdf1',this)">
+            <div class="dz-icon">📄</div>
+            <div class="dz-lbl">Annual Report PDF</div>
+            <div class="dz-hint">Optional</div>
+            <div class="dz-file" id="s-fn-pdf1"></div>
+          </div>
+          <div class="drop-zone" id="s-dz-pdf2">
+            <input type="file" accept=".pdf" id="s-f-pdf2" onchange="sOnFile('pdf2',this)">
+            <div class="dz-icon">🎤</div>
+            <div class="dz-lbl">Earnings Transcript</div>
+            <div class="dz-hint">Optional</div>
+            <div class="dz-file" id="s-fn-pdf2"></div>
+          </div>
         </div>
       </div>
+
+      <div id="s-src-fetch" style="display:none">
+        <div class="fetch-row">
+          <input type="text" id="s-fetch-ticker" placeholder="e.g. INFY, TCS, HDFCBANK" onkeydown="if(event.key==='Enter'){event.preventDefault();sFetchTicker();}">
+          <button id="s-fetch-btn" onclick="sFetchTicker()">Fetch</button>
+        </div>
+        <div class="hint">Pulls the public company page (no login) and parses its ratios/P&amp;L/balance-sheet/cash-flow tables — bypassing Screener's Excel export, which is login-gated. Depends on a third-party reader/proxy service being reachable, so it's less reliable than a manual export. The free page also shows a coarser balance sheet than the Excel export for some companies, so a few ratios may read N/A here even when they'd be present in the Excel export.</div>
+        <div class="dz-file" id="s-fetch-status" style="margin-top:.6rem"></div>
+      </div>
+
+      <div class="sector-row">
+        <label>Sector (optional — sharpens which risk models apply &amp; unlocks sectoral thesis alignment)</label>
+        <select id="s-sector-select" onchange="sSectorTouched=true;document.getElementById('s-sector-auto-note').style.display='none';">
+          <option value="general">General / Diversified (default — Z''-Score, all models equal weight)</option>
+          <option value="banking">Banking &amp; Financial Services</option>
+          <option value="renewable">Renewable Energy, Power &amp; Infrastructure</option>
+          <option value="manufacturing">Manufacturing, Electronics &amp; Semiconductors</option>
+          <option value="healthcare">Healthcare &amp; Pharmaceuticals</option>
+          <option value="consumption">Consumption, Retail &amp; Digital Tech</option>
+        </select>
+        <div class="sector-hint">Leave on General if unsure — the tool still runs the full analysis, it just won't tailor the distress model or show sector catalysts/risks.</div>
+        <div class="sector-hint" id="s-sector-auto-note" style="display:none;color:var(--accent);font-weight:600"></div>
+      </div>
+
+      <div class="sector-row">
+        <label>Qualitative &amp; ESG Assessment (optional)</label>
+        <div class="peers-grid" style="grid-template-columns: 1fr 1fr;">
+          <div class="peer-group">
+            <label>Management Quality</label>
+            <select id="s-qual-mgmt">
+              <option value="Strong">Strong</option>
+              <option value="Average" selected>Average</option>
+              <option value="Weak">Weak</option>
+            </select>
+          </div>
+          <div class="peer-group">
+            <label>ESG Risk</label>
+            <select id="s-qual-esg">
+              <option value="Low">Low</option>
+              <option value="Medium" selected>Medium</option>
+              <option value="High">High</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="peers-wrap">
+        <div class="peers-lbl">Peers — fetch automatically by ticker (fastest), or fill in manually below</div>
+        <div class="fetch-row" style="margin-bottom:.6rem">
+          <input type="text" id="s-peer-fetch-ticker" placeholder="Peer ticker, e.g. TCS" onkeydown="if(event.key==='Enter'){event.preventDefault();sFetchPeer();}">
+          <button id="s-peer-fetch-btn" onclick="sFetchPeer()">+ Add Peer</button>
+        </div>
+        <div id="s-peer-chips" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.9rem"></div>
+        <div class="peers-lbl">Manual Competitors (optional — use file upload above for full analysis, or enter basic metrics here)</div>
+        <div class="peers-grid">
+          <div class="peer-group"><label>Peer 1 Name</label><input type="text" id="s-p1n" placeholder="e.g. Kellton Tech"></div>
+          <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="s-p1d" placeholder="72x · 8% · 7%"></div>
+          <div class="peer-group"><label>Peer 2 Name</label><input type="text" id="s-p2n" placeholder="e.g. Mindteck"></div>
+          <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="s-p2d" placeholder="18x · 11% · 9%"></div>
+          <div class="peer-group"><label>Peer 3 Name</label><input type="text" id="s-p3n" placeholder="e.g. Redington India"></div>
+          <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="s-p3d" placeholder="18x · 20% · 2%"></div>
+          <div class="peer-group"><label>Peer 4 Name</label><input type="text" id="s-p4n" placeholder="e.g. Rashi Peripherals"></div>
+          <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="s-p4d" placeholder="21x · 19% · 2%"></div>
+        </div>
+      </div>
+
+      <div class="err" id="s-err-box"></div>
+      <button class="gen-btn" id="s-gen-btn" onclick="sGenerate()" disabled>⚡ Generate Research Report</button>
     </div>
 
-    <div class="peers-wrap">
-      <div class="peers-lbl">Manual Competitors (optional — use file upload above for full analysis, or enter basic metrics here)</div>
-      <div class="peers-grid">
-        <div class="peer-group"><label>Peer 1 Name</label><input type="text" id="p1n" placeholder="e.g. Kellton Tech"></div>
-        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p1d" placeholder="72x · 8% · 7%"></div>
-        <div class="peer-group"><label>Peer 2 Name</label><input type="text" id="p2n" placeholder="e.g. Mindteck"></div>
-        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p2d" placeholder="18x · 11% · 9%"></div>
-        <div class="peer-group"><label>Peer 3 Name</label><input type="text" id="p3n" placeholder="e.g. Redington India"></div>
-        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p3d" placeholder="18x · 20% · 2%"></div>
-        <div class="peer-group"><label>Peer 4 Name</label><input type="text" id="p4n" placeholder="e.g. Rashi Peripherals"></div>
-        <div class="peer-group"><label>P/E · ROE% · OPM%</label><input type="text" id="p4d" placeholder="21x · 19% · 2%"></div>
+    <div class="card" id="s-prog-card" style="display:none">
+      <div class="prog-title">Analysing your stock...</div>
+      <div class="pbar-wrap"><div class="pbar" id="s-pbar"></div></div>
+      <div class="plog" id="s-plog"></div>
+    </div>
+
+    <div class="card" id="s-res-card" style="display:none">
+      <div id="s-res-content"></div>
+      <div>
+        <button class="dl-btn" id="s-dl-btn">⬇ Download Word Report (.docx)</button>
+        <button class="reset-btn" onclick="sDoReset()">↩ Analyse Another Stock</button>
       </div>
     </div>
 
-    <div class="err" id="err-box"></div>
-    <button class="gen-btn" id="gen-btn" onclick="generate()" disabled>⚡ Generate Research Report</button>
   </div>
+  <!-- /mode-single -->
 
-  <!-- PROGRESS -->
-  <div class="card" id="prog-card" style="display:none">
-    <div class="prog-title">Analysing your stock...</div>
-    <div class="pbar-wrap"><div class="pbar" id="pbar"></div></div>
-    <div class="plog" id="plog"></div>
-  </div>
+  <!-- ══════════════════════════════════════════════════════════════════
+       MODE: PORTFOLIO ANALYSIS
+  ══════════════════════════════════════════════════════════════════ -->
+  <div class="mode-panel" id="mode-portfolio">
 
-  <!-- RESULTS -->
-  <div class="card" id="res-card" style="display:none">
-    <div id="res-content"></div>
-    <div>
-      <button class="dl-btn" id="dl-btn">⬇ Download Word Report (.docx)</button>
-      <button class="reset-btn" onclick="doReset()">↩ Analyse Another Stock</button>
+    <div class="card">
+      <div class="card-title">Build Your Portfolio</div>
+      <div class="card-sub">Add each holding by uploading its screener.in Excel export, or fetch its public data page directly by name/ticker. Mix both freely — every holding runs through the same 8-dimension scoring and distress models as the single-stock mode, with the sector auto-detected per company.</div>
+
+      <div class="add-row">
+        <div class="add-box">
+          <h4>📊 Upload screener.in Excel (.xlsx)</h4>
+          <input type="file" id="p-f-xlsx-multi" accept=".xlsx,.xls" multiple>
+          <div class="hint">Select one or more files at once. Each becomes a holding row below.</div>
+        </div>
+        <div class="add-box">
+          <h4>🌐 Fetch from Screener.in (beta)</h4>
+          <div class="fetch-row">
+            <input type="text" id="p-fetch-ticker" placeholder="INFY, TCS, HDFCBANK…" onkeydown="if(event.key==='Enter'){event.preventDefault();pFetchHolding();}">
+            <button id="p-fetch-btn" onclick="pFetchHolding()">Fetch</button>
+          </div>
+          <div class="hint">Paste several tickers at once (comma, space, or newline separated) to add a whole portfolio in one go. Pulls the public company page (no login) and parses its ratios/P&amp;L/balance-sheet/cash-flow tables — bypassing Screener's Excel export, which is login-gated. Less reliable than a manual export; click a failed row to see why. The free page also shows a coarser balance sheet than the Excel export for some companies, so a few ratios may read N/A on a fetched holding.</div>
+        </div>
+      </div>
+      <div class="empty-state" id="p-empty-state">
+        <div class="empty-icon">🗂️</div>
+        <div class="empty-title">No holdings yet</div>
+        <div class="empty-sub">Upload one or more screener.in Excel exports, or paste tickers above and hit Fetch — each becomes a row below, scored automatically.</div>
+      </div>
+
+      <div class="holdings-list" id="p-holdings-list" style="display:none">
+        <div class="holding-row head">
+          <div>Company</div><div>CMP</div><div>Qty Held</div><div>Position Value</div><div>Price History</div><div>Status</div><div></div>
+        </div>
+        <div id="p-holdings-rows"></div>
+      </div>
+      <div class="banner info" id="p-weight-banner" style="display:none"></div>
+      <div class="err" id="p-err-box"></div>
+      <div class="progress-log" id="p-prog-log"></div>
+
+      <button class="gen-btn" id="p-gen-btn" onclick="pRunPortfolioAnalysis()" disabled>⚡ Run Portfolio Analysis</button>
     </div>
+
+    <div class="card" id="p-res-card" style="display:none">
+      <div id="p-res-content"></div>
+      <div>
+        <button class="dl-btn" id="p-dl-btn">⬇ Download Word Report (.docx)</button>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-top:.5rem">
+      <a href="#" onclick="event.preventDefault();pRunSelfTest();" style="font-size:.68rem;color:var(--muted)">Run self-test</a>
+    </div>
+    <div class="card" id="p-selftest-card" style="display:none">
+      <div class="card-title">Self-Test</div>
+      <div class="card-sub">Runs validation checks against the exact functions loaded in this page right now, using throwaway synthetic holdings — not your real portfolio. Your current holdings are restored afterward.</div>
+      <pre id="p-selftest-output" style="white-space:pre-wrap;font-size:.72rem;background:var(--gray);padding:.85rem;border-radius:8px;max-height:400px;overflow:auto"></pre>
+    </div>
+
   </div>
+  <!-- /mode-portfolio -->
 
 </div><!-- /page -->
 
 <script>
-// ─── State ────────────────────────────────────────────────────────────────────
-let files={xlsx:null,pdf1:null,pdf2:null,peers:[]};
-let docxBlob=null;
-let logLines=[];
-
-function onFile(type,inp){
-  if(type==='peers'){
-    const fs = inp.files;
-    if(!fs || fs.length===0) return;
-    files.peers = Array.from(fs);
-    document.getElementById('dz-peers').classList.add('ready');
-    document.getElementById('fn-peers').textContent = fs.length + ' file(s) selected';
-    return;
-  }
-  const f=inp.files[0]; if(!f)return;
-  files[type]=f;
-  document.getElementById('dz-'+type).classList.add('ready');
-  document.getElementById('dz-'+type).classList.remove('mandatory');
-  document.getElementById('fn-'+type).textContent=f.name;
-  if(type==='xlsx'){
-    document.getElementById('gen-btn').disabled=false;
-  }
+/* ════════════════════════════════════════════════════════════════════
+   MODE SWITCHER
+   ════════════════════════════════════════════════════════════════════ */
+function switchMode(mode){
+  document.getElementById('mode-single').classList.toggle('active',mode==='single');
+  document.getElementById('mode-portfolio').classList.toggle('active',mode==='portfolio');
+  document.getElementById('tab-single').classList.toggle('active',mode==='single');
+  document.getElementById('tab-portfolio').classList.toggle('active',mode==='portfolio');
 }
 
-// ─── Excel Parser ─────────────────────────────────────────────────────────────
+/* ════════════════════════════════════════════════════════════════════
+   SHARED UTILITIES  (used by both single-stock and portfolio modes)
+   ════════════════════════════════════════════════════════════════════ */
+const last=arr=>{ if(!Array.isArray(arr))return null; const c=arr.filter(v=>v!=null); return c.length?c.at(-1):null; };
+function trend(arr){
+  if(!Array.isArray(arr))return'stable';
+  const c=arr.filter(v=>v!=null);
+  if(c.length<3)return'stable';
+  if(c.at(-1)>c.at(-3)*1.05)return'improving';
+  if(c.at(-1)<c.at(-3)*0.95)return'declining';
+  return'stable';
+}
+const safe=(v,d=0)=>v!=null?v:d;
+const sign=v=>v==null?'':(v>=0?'+':'');
+const fmtCr=v=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
+const fmtPct=v=>v==null?'—':v.toFixed(1)+'%';
+
+function showErr(scope,msg){const el=document.getElementById(scope+'-err-box');if(!el)return;el.textContent=msg;el.style.display='block';}
+function hideErr(scope){const el=document.getElementById(scope+'-err-box');if(!el)return;el.style.display='none';}
+
+/* ── Shared display helpers (single-stock report + reused wherever useful) ── */
+function ratingStyle(r=''){
+  const u=r.toUpperCase();
+  if(u.includes('STRONG BUY')||u.includes('BUY'))return'color:var(--green);background:var(--lgreen)';
+  if(u.includes('HOLD'))return'color:var(--amber);background:var(--lamber)';
+  return'color:var(--red);background:var(--lred)';
+}
+function scoreColor(v){if(v>=8)return'#15803d';if(v>=6)return'#0369a1';if(v>=4)return'#b45309';return'#b91c1c';}
+function fsClass(p){return p===true?'pass':(p===false?'fail':'na');}
+function fsIcon(p){return p===true?'✓':(p===false?'✗':'—');}
+function fsVerdict(p){return p===true?'PASS':(p===false?'FAIL':'N/A');}
+function zoneCss(zone){return zone==='Safe'?'zone-safe':(zone==='Grey'?'zone-grey':'zone-distress');}
+function zoneBadge(zone){
+  if(zone==='Safe')return'color:var(--green);background:var(--lgreen)';
+  if(zone==='Grey')return'color:var(--amber);background:var(--lamber)';
+  return'color:var(--red);background:var(--lred)';
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   SHARED EXCEL PARSER  (screener.in "Data Sheet" export — identical
+   mapping used to feed the single-stock report and every portfolio
+   holding, so both modes always agree on the numbers for a company).
+   ════════════════════════════════════════════════════════════════════ */
 function parseExcel(arrayBuf){
   const wb=XLSX.read(arrayBuf,{type:'array',cellDates:false,raw:true});
   if(!wb.SheetNames.includes('Data Sheet'))
     throw new Error('"Data Sheet" tab not found. Please use the screener.in Excel export (not a custom file).');
   const ws=wb.Sheets['Data Sheet'];
 
-  // Read any cell by 1-based row, col
-  function cv(r,c){
-    const a=XLSX.utils.encode_cell({r:r-1,c:c-1});
-    return ws[a]?ws[a].v:null;
-  }
-  function num(v){
-    if(v===null||v===undefined)return null;
-    const n=parseFloat(v);
-    return isNaN(n)?null:n;
-  }
-  // label text at (row, col=1) — used for verifying inferred rows below
-  function labelAt(r){
-    const v=cv(r,1);
-    return v?String(v).trim().toLowerCase():'';
-  }
-
-  // Excel serial date → "Mar 2025"
+  function cv(r,c){ const a=XLSX.utils.encode_cell({r:r-1,c:c-1}); return ws[a]?ws[a].v:null; }
+  function num(v){ if(v===null||v===undefined)return null; const n=parseFloat(v); return isNaN(n)?null:n; }
+  function labelAt(r){ const v=cv(r,1); return v?String(v).trim().toLowerCase():''; }
   function fmtSerial(v){
     if(!v)return '';
     let d;
-    if(typeof v==='number'){
-      // Excel date serial (days since 1900-01-01, with Lotus bug at day 60)
-      const ms=(v-25569)*86400*1000;
-      d=new Date(ms);
-    } else {
-      d=new Date(v);
-    }
+    if(typeof v==='number'){ const ms=(v-25569)*86400*1000; d=new Date(ms); } else { d=new Date(v); }
     if(isNaN(d.getTime()))return String(v);
     return d.toLocaleDateString('en-IN',{month:'short',year:'numeric'});
   }
 
-  // META (fixed positions)
   const companyName=cv(1,2)||'Company';
   const faceValue=num(cv(7,2));
   const cmp=num(cv(8,2));
   const mktCap=num(cv(9,2));
   const sharesCr=cmp&&mktCap?parseFloat((mktCap/cmp).toFixed(2)):null;
 
-  // Bank/NBFC heuristic: screener labels row 17 "Interest Earned"/"Interest Income" instead of "Sales" for financials
   const salesLabel=labelAt(17);
   const looksLikeBank=salesLabel.includes('interest earned')||salesLabel.includes('interest income')||
     (salesLabel.includes('interest')&&!salesLabel.includes('sales'));
 
-  // ── ANNUAL: scan row 16 cols 2–11 for dates ────────────────────────────────
   const annCols=[];
-  for(let c=2;c<=11;c++){
-    const v=cv(16,c);
-    if(v!==null&&v!==undefined&&v!==''){
-      const n=num(v);
-      if(n&&n>40000) annCols.push(c); // Excel date serials for 2010+ are >40000
-    }
-  }
+  for(let c=2;c<=11;c++){ const v=cv(16,c); if(v!==null&&v!==undefined&&v!==''){ const n=num(v); if(n&&n>40000) annCols.push(c); } }
   if(annCols.length===0) throw new Error('Could not find annual date row. Ensure you exported from screener.in.');
-
   const annYears=annCols.map(c=>fmtSerial(cv(16,c)));
+  function annRow(r){ return annCols.map(c=>num(cv(r,c))); }
 
-  function annRow(r){
-    return annCols.map(c=>num(cv(r,c)));
-  }
+  const annSales=annRow(17),annRawMat=annRow(18),annInvent=annRow(19),annPower=annRow(20),annMfg=annRow(21),
+        annEmp=annRow(22),annSell=annRow(23),annOthExp=annRow(24),annOthInc=annRow(25),annDepn=annRow(26),
+        annInt=annRow(27),annPat=annRow(30),annDivPayout=annRow(31);
 
-  const annSales  =annRow(17);
-  const annRawMat =annRow(18);
-  const annInvent =annRow(19);
-  const annPower  =annRow(20);
-  const annMfg    =annRow(21);
-  const annEmp    =annRow(22);
-  const annSell   =annRow(23);
-  const annOthExp =annRow(24);
-  const annOthInc =annRow(25);
-  const annDepn   =annRow(26);
-  const annInt    =annRow(27);
-  const annPat    =annRow(30);
-  const annDivPayout=annRow(31);
-
-  // NEW: Profit-before-tax & Tax — sit between Interest(27) and Net Profit(30).
-  // Position is verified against the row label (with a small-window fallback search)
-  // so a template shift in screener's export doesn't silently corrupt the new models.
-  let pbtRow=28, taxRow=29, advRowsVerified=true;
+  let pbtRow=28,taxRow=29,advRowsVerified=true;
   if(!(labelAt(28).includes('before tax')||labelAt(28).includes('pbt'))){
     advRowsVerified=false;
     for(let r=26;r<=30;r++){ if(labelAt(r).includes('before tax')){ pbtRow=r; break; } }
@@ -462,133 +612,65 @@ function parseExcel(arrayBuf){
     advRowsVerified=false;
     for(let r=27;r<=31;r++){ if(labelAt(r).includes('tax')&&!labelAt(r).includes('before')){ taxRow=r; break; } }
   }
-  const annPbt=annRow(pbtRow);
-  const annTax=annRow(taxRow);
-  // EBIT per the mapping taxonomy: Operating Profit + Other Income − Depreciation
-  const annEbitPre=annCols.map((c,i)=>{
-    return null; // placeholder, real calc after annOpProfit exists below
-  });
+  const annPbt=annRow(pbtRow),annTax=annRow(taxRow);
 
   const annOpProfit=annSales.map((s,i)=>{
     if(!s)return null;
-    const costs=[annRawMat[i],annInvent[i],annPower[i],annMfg[i],annEmp[i],annSell[i],annOthExp[i]]
-      .reduce((a,v)=>a+(v||0),0);
+    const costs=[annRawMat[i],annInvent[i],annPower[i],annMfg[i],annEmp[i],annSell[i],annOthExp[i]].reduce((a,v)=>a+(v||0),0);
     return parseFloat((s-costs).toFixed(2));
   });
   const annOpm=annSales.map((s,i)=>s&&annOpProfit[i]!=null?parseFloat((annOpProfit[i]/s*100).toFixed(1)):null);
   const annNpm=annSales.map((s,i)=>s&&annPat[i]!=null?parseFloat((annPat[i]/s*100).toFixed(1)):null);
   const annEbit=annOpProfit.map((op,i)=>(op!=null&&annOthInc[i]!=null&&annDepn[i]!=null)?parseFloat((op+annOthInc[i]-annDepn[i]).toFixed(2)):null);
 
-  // Adjusted shares row 93 — same cols as annual
   const adjShares=annCols.map(c=>num(cv(93,c)));
-  const annEps=annPat.map((pat,i)=>{
-    const sh=adjShares[i];
-    return (sh&&pat&&sh>0)?parseFloat((pat/sh).toFixed(2)):null;
-  });
+  const annEps=annPat.map((pat,i)=>{ const sh=adjShares[i]; return (sh&&pat&&sh>0)?parseFloat((pat/sh).toFixed(2)):null; });
 
-  // CAGR
-  function cagr(nv,ov,y){if(!nv||!ov||ov<=0)return null;return parseFloat(((Math.pow(nv/ov,1/y)-1)*100).toFixed(1));}
-  const lsales=annSales.filter(v=>v!=null);
-  const lpat=annPat.filter(v=>v!=null);
+  function cagr(nv,ov,y){ if(!nv||!ov||ov<=0)return null; return parseFloat(((Math.pow(nv/ov,1/y)-1)*100).toFixed(1)); }
+  const lsales=annSales.filter(v=>v!=null), lpat=annPat.filter(v=>v!=null);
   const salesCagr3=lsales.length>=4?cagr(lsales.at(-1),lsales.at(-4),3):null;
   const salesCagr5=lsales.length>=6?cagr(lsales.at(-1),lsales.at(-6),5):null;
   const patCagr3=lpat.length>=4?cagr(lpat.at(-1),lpat.at(-4),3):null;
 
-  // ── QUARTERLY: scan row 41 cols 1–11 for dates ────────────────────────────
   const qCols=[];
-  for(let c=1;c<=11;c++){
-    const v=cv(41,c);
-    if(v!==null&&v!==undefined&&v!==''){
-      const n=num(v);
-      if(n&&n>40000) qCols.push(c);
-    }
-  }
+  for(let c=1;c<=11;c++){ const v=cv(41,c); if(v!==null&&v!==undefined&&v!==''){ const n=num(v); if(n&&n>40000) qCols.push(c); } }
   const qPeriods=qCols.map(c=>fmtSerial(cv(41,c)));
-
-  function qRow(r){return qCols.map(c=>num(cv(r,c)));}
-  const qSales  =qRow(42);
-  const qExp    =qRow(43);
-  const qPat    =qRow(49);
-  const qOpProf =qRow(50);
-  const qOpm    =qSales.map((s,i)=>s&&qOpProf[i]!=null?parseFloat((qOpProf[i]/s*100).toFixed(1)):null);
-
-  const lastQSales=qSales.filter(v=>v!=null).at(-1);
-  const lastQPat=qPat.filter(v=>v!=null).at(-1);
-  const lastQOpm=qOpm.filter(v=>v!=null).at(-1);
+  function qRow(r){ return qCols.map(c=>num(cv(r,c))); }
+  const qSales=qRow(42),qExp=qRow(43),qPat=qRow(49),qOpProf=qRow(50);
+  const qOpm=qSales.map((s,i)=>s&&qOpProf[i]!=null?parseFloat((qOpProf[i]/s*100).toFixed(1)):null);
+  const lastQSales=qSales.filter(v=>v!=null).at(-1), lastQPat=qPat.filter(v=>v!=null).at(-1), lastQOpm=qOpm.filter(v=>v!=null).at(-1);
   const lastQLabel=qPeriods.at(-1)||'';
-  function yoyQ(arr){const c=arr.filter(v=>v!=null);if(c.length<5||!c.at(-5))return null;return parseFloat(((c.at(-1)/c.at(-5)-1)*100).toFixed(1));}
-  const yoyQSales=yoyQ(qSales);
-  const yoyQPat=yoyQ(qPat);
+  function yoyQ(arr){ const c=arr.filter(v=>v!=null); if(c.length<5||!c.at(-5))return null; return parseFloat(((c.at(-1)/c.at(-5)-1)*100).toFixed(1)); }
+  const yoyQSales=yoyQ(qSales), yoyQPat=yoyQ(qPat);
 
-  // ── BALANCE SHEET: scan row 56 cols 2–11 ─────────────────────────────────
   const bsCols=[];
-  for(let c=2;c<=11;c++){
-    const v=cv(56,c);
-    if(v!==null&&v!==undefined&&v!==''){
-      const n=num(v);
-      if(n&&n>40000) bsCols.push(c);
-    }
-  }
+  for(let c=2;c<=11;c++){ const v=cv(56,c); if(v!==null&&v!==undefined&&v!==''){ const n=num(v); if(n&&n>40000) bsCols.push(c); } }
   const bsYears=bsCols.map(c=>fmtSerial(cv(56,c)));
+  function bsRow(r){ return bsCols.map(c=>num(cv(r,c))); }
+  const bsEqCap=bsRow(57),bsRes=bsRow(58),bsBorr=bsRow(59),bsTotal=bsRow(61),bsNetBlk=bsRow(62),
+        bsRecv=bsRow(67),bsInv=bsRow(68),bsCash=bsRow(69);
 
-  function bsRow(r){return bsCols.map(c=>num(cv(r,c)));}
-  const bsEqCap=bsRow(57);
-  const bsRes  =bsRow(58);
-  const bsBorr =bsRow(59);
-  const bsTotal=bsRow(61);
-  const bsNetBlk=bsRow(62);
-  const bsRecv =bsRow(67);
-  const bsInv  =bsRow(68);
-  const bsCash =bsRow(69);
-
-  // NEW: Other Liabilities — sits between Borrowings(59) and Total(61); verified against label.
   let othLiabRow=60;
-  if(!labelAt(60).includes('liabilit')){
-    for(let r=58;r<=62;r++){ if(labelAt(r).includes('other liabilit')){ othLiabRow=r; break; } }
-  }
+  if(!labelAt(60).includes('liabilit')){ for(let r=58;r<=62;r++){ if(labelAt(r).includes('other liabilit')){ othLiabRow=r; break; } } }
   const bsOthLiab=bsRow(othLiabRow);
 
   const bsEquity=bsEqCap.map((e,i)=>parseFloat(((e||0)+(bsRes[i]||0)).toFixed(2)));
   const bsDeR=bsEquity.map((eq,i)=>eq&&bsBorr[i]!=null?parseFloat((bsBorr[i]/eq).toFixed(2)):null);
-  const bsRoe=bsEquity.map((eq,i)=>{
-    const pat=i<annPat.length?annPat[i]:annPat.at(-1);
-    return eq&&pat?parseFloat((pat/eq*100).toFixed(1)):null;
-  });
-  const bsDdays=bsCols.map((_,i)=>{
-    const s=i<annSales.length?annSales[i]:null;
-    const r=bsRecv[i];
-    return s&&r&&s>0?parseFloat((r/(s/365)).toFixed(1)):null;
-  });
+  const bsRoe=bsEquity.map((eq,i)=>{ const pat=i<annPat.length?annPat[i]:annPat.at(-1); return eq&&pat?parseFloat((pat/eq*100).toFixed(1)):null; });
+  const bsDdays=bsCols.map((_,i)=>{ const s=i<annSales.length?annSales[i]:null; const r=bsRecv[i]; return s&&r&&s>0?parseFloat((r/(s/365)).toFixed(1)):null; });
 
   const bsTotalLiab=bsTotal.map((t,i)=>(t!=null&&bsEquity[i]!=null)?parseFloat((t-bsEquity[i]).toFixed(2)):null);
-  const bsCurrentAssets=bsRecv.map((r,i)=>{
-    const inv=bsInv[i], cash=bsCash[i];
-    if(r==null&&inv==null&&cash==null)return null;
-    return parseFloat(((r||0)+(inv||0)+(cash||0)).toFixed(2));
-  });
+  const bsCurrentAssets=bsRecv.map((r,i)=>{ const inv=bsInv[i],cash=bsCash[i]; if(r==null&&inv==null&&cash==null)return null; return parseFloat(((r||0)+(inv||0)+(cash||0)).toFixed(2)); });
   const bsCurrentLiab=bsOthLiab;
   const bsWorkingCap=bsCurrentAssets.map((ca,i)=>(ca!=null&&bsCurrentLiab[i]!=null)?parseFloat((ca-bsCurrentLiab[i]).toFixed(2)):null);
-
-  // Advanced liquidity metrics 
   const bsCurrentRatio=bsCurrentAssets.map((ca,i)=>(ca!=null&&bsCurrentLiab[i]!=null&&bsCurrentLiab[i]>0)?parseFloat((ca/bsCurrentLiab[i]).toFixed(2)):null);
   const bsQuickRatio=bsCurrentAssets.map((ca,i)=>(ca!=null&&bsInv[i]!=null&&bsCurrentLiab[i]!=null&&bsCurrentLiab[i]>0)?parseFloat(((ca-bsInv[i])/bsCurrentLiab[i]).toFixed(2)):null);
 
-  // ── CASH FLOW: scan row 81 ───────────────────────────────────────────────
   const cfCols=[];
-  for(let c=2;c<=11;c++){
-    const v=cv(81,c);
-    if(v!==null&&v!==undefined&&v!==''){
-      const n=num(v);
-      if(n&&n>40000) cfCols.push(c);
-    }
-  }
+  for(let c=2;c<=11;c++){ const v=cv(81,c); if(v!==null&&v!==undefined&&v!==''){ const n=num(v); if(n&&n>40000) cfCols.push(c); } }
   const cfYears=cfCols.map(c=>fmtSerial(cv(81,c)));
-  function cfRow(r){return cfCols.map(c=>num(cv(r,c)));}
-  const cfOps=cfRow(82);
-  const cfInv=cfRow(83);
-  const cfFin=cfRow(84);
-
-  // Free Cash Flow estimation
+  function cfRow(r){ return cfCols.map(c=>num(cv(r,c))); }
+  const cfOps=cfRow(82),cfInv=cfRow(83),cfFin=cfRow(84);
   const cfFcf=cfOps.map((cfo,i)=>(cfo!=null&&cfInv[i]!=null)?parseFloat((cfo+cfInv[i]).toFixed(2)):null);
 
   const trailingPE=cmp&&annEps.filter(v=>v).at(-1)?parseFloat((cmp/annEps.filter(v=>v).at(-1)).toFixed(1)):null;
@@ -610,36 +692,19 @@ function parseExcel(arrayBuf){
     cashFlow:{years:cfYears,ops:cfOps,investing:cfInv,financing:cfFin},
   };
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const last=arr=>{
-  if(!Array.isArray(arr))return null;
-  const c=arr.filter(v=>v!=null);
-  return c.length?c.at(-1):null;
-};
-function trend(arr){
-  if(!Array.isArray(arr))return'stable';
-  const c=arr.filter(v=>v!=null);
-  if(c.length<3)return'stable';
-  if(c.at(-1)>c.at(-3)*1.05)return'improving';
-  if(c.at(-1)<c.at(-3)*0.95)return'declining';
-  return'stable';
-}
-
-// ─── Scoring Engine ───────────────────────────────────────────────────────────
-const safe=(v,d=0)=>v!=null?v:d;
-const sign=v=>v==null?'':(v>=0?'+':'');
-const fmtCr=v=>v==null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:0});
-const fmtPct=v=>v==null?'—':v.toFixed(1)+'%';
-
+</script>
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   SHARED SCORING + RISK ENGINE  (single source of truth — used by both
+   the single-stock report and every holding inside the portfolio mode,
+   so the two modes can never silently disagree on a company's numbers).
+   ════════════════════════════════════════════════════════════════════ */
 function scoreGrowth(a,q){
   let s=5,sc3=safe(a.salesCagr3),pc3=safe(a.patCagr3),sc5=safe(a.salesCagr5);
   if(sc3>30)s+=2;else if(sc3>20)s+=1;else if(sc3<5)s-=2;else if(sc3<10)s-=1;
   if(pc3>sc3)s+=1;
   if(sc5>15)s+=1;else if(sc5<5)s-=1;
-  const qt=trend(q.sales);
-  if(qt==='improving')s+=1;
-  if(qt==='declining')s-=1;
+  if(q){ const qt=trend(q.sales); if(qt==='improving')s+=1; if(qt==='declining')s-=1; }
   return Math.max(0,Math.min(10,s));
 }
 function scoreMargins(a){
@@ -701,6 +766,12 @@ function scoreCons(a){
   if(np===0)s+=2;else s-=np;
   return Math.max(0,Math.min(10,s));
 }
+function scoreAll(a,bs,cf,m,q){
+  return{
+    growth:scoreGrowth(a,q),margins:scoreMargins(a),balanceSheet:scoreBS(bs),cashflow:scoreCF(cf,a),
+    returns:scoreRet(bs),workingCap:scoreWC(bs),valuation:scoreVal(m,a),consistency:scoreCons(a),
+  };
+}
 
 function deriveRatings(sc,m,a){
   const comp=Object.values(sc).reduce((a,v)=>a+v,0)/Object.keys(sc).length;
@@ -708,55 +779,6 @@ function deriveRatings(sc,m,a){
   const lng=sc.growth*0.35+sc.returns*0.25+sc.margins*0.2+sc.cashflow*0.2;
   function rat(v,adj=0){v+=adj;if(v>=8.5)return'STRONG BUY';if(v>=7)return'BUY';if(v>=5.5)return'HOLD';if(v>=4)return'SELL / AVOID';return'STRONG SELL';}
   return{composite:parseFloat(comp.toFixed(1)),r6m:rat(near),r1y:rat((near+lng)/2),r3y:rat(lng),r5y:rat(lng,0.5)};
-}
-
-function buildVal(m,a,bs){
-  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),mcap=safe(m.mktCap,0),sc3=safe(a.salesCagr3,10);
-  const leps=last(a.eps)||(pe?cmp/pe:0);
-  const gBase=Math.min(sc3*0.75,40),gBull=Math.min(sc3,50),gBear=Math.max(sc3*0.4,5);
-  const epsFY2Base=leps?parseFloat((leps*(1+gBase/100)**2).toFixed(1)):null;
-  const epsFY2Bull=leps?parseFloat((leps*(1+gBull/100)**2).toFixed(1)):null;
-  const epsFY2Bear=leps?parseFloat((leps*(1+gBear/100)**2).toFixed(1)):null;
-  const peB=Math.round(pe*0.9),peBull=Math.round(pe*1.1),peBear=Math.round(pe*0.65);
-  const tp=(e,mult)=>e?Math.round(e*mult):null;
-  const lDepn=last(a.depreciation)||0,lOp=last(a.opProfit)||0,ebitda=lOp+lDepn;
-  const ebitdaFY2=ebitda*(1+gBase/100)**2;
-  const borr=last(bs.borr)||0,cash=last(bs.cash)||0,netDebt=borr-cash,sh=safe(m.sharesCr,1);
-  const evBase=(mcap+netDebt),evMult=ebitda?parseFloat((evBase/ebitda).toFixed(1)):15;
-  const evBull=Math.round(evMult*1.15),evBase2=Math.round(evMult*0.95),evBear=Math.round(evMult*0.70);
-  const evTp=mult=>{const ev=ebitdaFY2*mult;const eq=ev-netDebt;return sh&&eq>0?Math.round(eq/sh):null;};
-  const dcf={};
-  for(const[nm,g]of[['bull',gBull],['base',gBase],['bear',gBear]]){
-    let fcf=last(a.pat)||0,pv=0;
-    for(let yr=1;yr<=5;yr++){fcf*=(1+g/100);pv+=fcf/(1.12**yr);}
-    const tv=fcf*1.04/0.08,tvpv=tv/(1.12**5);
-    dcf[nm]=sh?Math.round((pv+tvpv-netDebt)/sh):null;
-  }
-  const f=v=>v?'₹'+v.toLocaleString('en-IN'):'—';
-  return{
-    evMult,
-    pe:{bull:`${f(tp(epsFY2Bull,peBull))} (${peBull}x)`,base:`${f(tp(epsFY2Base,peB))} (${peB}x)`,bear:`${f(tp(epsFY2Bear,peBear))} (${peBear}x)`,note:`FY+2E EPS — Bull ₹${epsFY2Bull}, Base ₹${epsFY2Base}, Bear ₹${epsFY2Bear}`},
-    ev:{bull:f(evTp(evBull)),base:f(evTp(evBase2)),bear:f(evTp(evBear)),note:`Current EV/EBITDA ~${evMult}x`},
-    dcf:{bull:f(dcf.bull),base:f(dcf.base),bear:f(dcf.bear),note:'12% WACC, 4% terminal growth, 5Y explicit'},
-    epsFY2Base,peBase:peB,
-  };
-}
-
-function buildStrategy(rat,m,a){
-  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),sc3=safe(a.salesCagr3,10);
-  function mults(r,h){
-    if(r.includes('STRONG BUY'))return{6:[0.98,1.18],12:[1.10,1.40],36:[1.60,2.40],60:[2.20,3.50]}[h];
-    if(r.includes('BUY'))       return{6:[0.95,1.12],12:[1.05,1.28],36:[1.40,2.00],60:[1.80,2.80]}[h];
-    if(r.includes('HOLD'))      return{6:[0.90,1.05],12:[0.95,1.15],36:[1.10,1.60],60:[1.40,2.20]}[h];
-    return                             {6:[0.72,0.90],12:[0.80,1.00],36:[0.90,1.30],60:[1.10,1.80]}[h];
-  }
-  function makeEntry(lbl,months,rating){
-    const[ml,mh]=mults(rating,months);
-    const tl=Math.round(cmp*ml),th=Math.round(cmp*mh);
-    const ul=Math.round((tl/cmp-1)*100),uh=Math.round((th/cmp-1)*100);
-    return{label:lbl,rating,target:`₹${tl.toLocaleString('en-IN')}–${th.toLocaleString('en-IN')}`,upside:`${sign(ul)}${ul}% to ${sign(uh)}${uh}%`};
-  }
-  return[makeEntry('6 Months',6,rat.r6m),makeEntry('1 Year',12,rat.r1y),makeEntry('3 Years',36,rat.r3y),makeEntry('5 Years',60,rat.r5y)];
 }
 
 const SECTOR_INFO={
@@ -830,10 +852,7 @@ function calcOhlsonO(a,bs){
   const FFO_TL=(ffo!=null&&tl>0)?ffo/tl:0;
   const Y=(pats.length>=2&&pats.at(-1)<0&&pats.at(-2)<0)?1:0;
   let dNI=0;
-  if(pats.length>=2){
-    const cur=pats.at(-1),prev=pats.at(-2),denom=Math.abs(cur)+Math.abs(prev);
-    dNI=denom>0?(cur-prev)/denom:0;
-  }
+  if(pats.length>=2){ const cur=pats.at(-1),prev=pats.at(-2),denom=Math.abs(cur)+Math.abs(prev); dNI=denom>0?(cur-prev)/denom:0; }
   const Oraw=-1.32-0.407*lnTA+6.03*TL_TA-1.43*WC_TA+0.0757*CL_CA-2.37*X-1.83*NI_TA+0.285*FFO_TL-1.72*Y-0.521*dNI;
   const Oc=Math.max(-50,Math.min(50,Oraw));
   const P=Math.exp(Oc)/(1+Math.exp(Oc));
@@ -883,7 +902,6 @@ function calcGrahamNumber(a,bs,m,sector){
 }
 
 function calc3StageFilter(zRes,oRes,duRes,grahamRes,a,bs,m,sector){
-  // Stage 1: Survival — reject if O-Score default probability > 50% or Z''/Z below the distress threshold
   const s1_oOK=oRes.applicable?oRes.probability<=50:null;
   const s1_zOK=zRes.applicable?zRes.value>=zRes.zoneThresholds.distress:null;
   const stage1Detail=[];
@@ -892,7 +910,6 @@ function calc3StageFilter(zRes,oRes,duRes,grahamRes,a,bs,m,sector){
   if(!zRes.applicable&&zRes.skipped)stage1Detail.push('Z-Score skipped for this sector — survival read from O-Score alone');
   const stage1Pass=(s1_oOK==null&&s1_zOK==null)?null:((s1_oOK!==false)&&(s1_zOK!==false));
 
-  // Stage 2: Moat — ROE > 15%, Equity Multiplier < 2.0x (waived for banking, where leverage is structural), 3Y avg ROCE > 15%
   const roe=duRes.applicable?duRes.roe:null;
   const em=duRes.applicable?duRes.equityMultiplier:null;
   const roceArr=(bs.years||[]).map((_,i)=>{
@@ -910,7 +927,6 @@ function calc3StageFilter(zRes,oRes,duRes,grahamRes,a,bs,m,sector){
   const stage2Pass=(roe==null&&roce3y==null)?null:
     ((roe==null||roe>15)&&(sector==='banking'||em==null||em<2.0)&&(roce3y==null||roce3y>15));
 
-  // Stage 3: Price — Graham margin of safety for asset-heavy sectors, PEG for asset-light
   const pe=m.trailingPE, growthProxy=a.patCagr3||a.salesCagr3;
   const peg=(pe&&growthProxy>0)?pe/growthProxy:null;
   const stage3Detail=[];
@@ -931,6 +947,482 @@ function calc3StageFilter(zRes,oRes,duRes,grahamRes,a,bs,m,sector){
   };
 }
 
+/* Full P/E · EV/EBITDA · DCF valuation range — used by the single-stock report */
+function buildVal(m,a,bs){
+  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),mcap=safe(m.mktCap,0),sc3=safe(a.salesCagr3,10);
+  const leps=last(a.eps)||(pe?cmp/pe:0);
+  const gBase=Math.min(sc3*0.75,40),gBull=Math.min(sc3,50),gBear=Math.max(sc3*0.4,5);
+  const epsFY2Base=leps?parseFloat((leps*(1+gBase/100)**2).toFixed(1)):null;
+  const epsFY2Bull=leps?parseFloat((leps*(1+gBull/100)**2).toFixed(1)):null;
+  const epsFY2Bear=leps?parseFloat((leps*(1+gBear/100)**2).toFixed(1)):null;
+  const peB=Math.round(pe*0.9),peBull=Math.round(pe*1.1),peBear=Math.round(pe*0.65);
+  const tp=(e,mult)=>e?Math.round(e*mult):null;
+  const lDepn=last(a.depreciation)||0,lOp=last(a.opProfit)||0,ebitda=lOp+lDepn;
+  const ebitdaFY2=ebitda*(1+gBase/100)**2;
+  const borr=last(bs.borr)||0,cash=last(bs.cash)||0,netDebt=borr-cash,sh=safe(m.sharesCr,1);
+  const evBase=(mcap+netDebt),evMult=ebitda?parseFloat((evBase/ebitda).toFixed(1)):15;
+  const evBull=Math.round(evMult*1.15),evBase2=Math.round(evMult*0.95),evBear=Math.round(evMult*0.70);
+  const evTp=mult=>{const ev=ebitdaFY2*mult;const eq=ev-netDebt;return sh&&eq>0?Math.round(eq/sh):null;};
+  const dcf={};
+  for(const[nm,g]of[['bull',gBull],['base',gBase],['bear',gBear]]){
+    let fcf=last(a.pat)||0,pv=0;
+    for(let yr=1;yr<=5;yr++){fcf*=(1+g/100);pv+=fcf/(1.12**yr);}
+    const tv=fcf*1.04/0.08,tvpv=tv/(1.12**5);
+    dcf[nm]=sh?Math.round((pv+tvpv-netDebt)/sh):null;
+  }
+  const f=v=>v?'₹'+v.toLocaleString('en-IN'):'—';
+  return{
+    evMult,
+    pe:{bull:`${f(tp(epsFY2Bull,peBull))} (${peBull}x)`,base:`${f(tp(epsFY2Base,peB))} (${peB}x)`,bear:`${f(tp(epsFY2Bear,peBear))} (${peBear}x)`,note:`FY+2E EPS — Bull ₹${epsFY2Bull}, Base ₹${epsFY2Base}, Bear ₹${epsFY2Bear}`},
+    ev:{bull:f(evTp(evBull)),base:f(evTp(evBase2)),bear:f(evTp(evBear)),note:`Current EV/EBITDA ~${evMult}x`},
+    dcf:{bull:f(dcf.bull),base:f(dcf.base),bear:f(dcf.bear),note:'12% WACC, 4% terminal growth, 5Y explicit'},
+    epsFY2Base,peBase:peB,
+  };
+}
+
+function buildStrategy(rat,m,a){
+  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),sc3=safe(a.salesCagr3,10);
+  function mults(r,h){
+    if(r.includes('STRONG BUY'))return{6:[0.98,1.18],12:[1.10,1.40],36:[1.60,2.40],60:[2.20,3.50]}[h];
+    if(r.includes('BUY'))       return{6:[0.95,1.12],12:[1.05,1.28],36:[1.40,2.00],60:[1.80,2.80]}[h];
+    if(r.includes('HOLD'))      return{6:[0.90,1.05],12:[0.95,1.15],36:[1.10,1.60],60:[1.40,2.20]}[h];
+    return                             {6:[0.72,0.90],12:[0.80,1.00],36:[0.90,1.30],60:[1.10,1.80]}[h];
+  }
+  function makeEntry(lbl,months,rating){
+    const[ml,mh]=mults(rating,months);
+    const tl=Math.round(cmp*ml),th=Math.round(cmp*mh);
+    const ul=Math.round((tl/cmp-1)*100),uh=Math.round((th/cmp-1)*100);
+    return{label:lbl,rating,target:`₹${tl.toLocaleString('en-IN')}–${th.toLocaleString('en-IN')}`,upside:`${sign(ul)}${ul}% to ${sign(uh)}${uh}%`};
+  }
+  return[makeEntry('6 Months',6,rat.r6m),makeEntry('1 Year',12,rat.r1y),makeEntry('3 Years',36,rat.r3y),makeEntry('5 Years',60,rat.r5y)];
+}
+
+/* Cheap keyword-based sector sniff — used to auto-pick the quant model
+   (Z-score variant, Graham applicability, banking waivers) for portfolio
+   holdings automatically, and to pre-fill the single-stock sector dropdown
+   so picking it manually is the exception rather than the rule. */
+function sniffSector(m,a){
+  const n=(m.companyName||'').toLowerCase();
+  if(m.looksLikeBank) return 'Banking/Financial';
+  if(/pharma|health|hospital|lab/.test(n)) return 'Healthcare';
+  if(/power|energy|solar|renew/.test(n)) return 'Energy/Power';
+  if(/bank|finance|nbfc/.test(n)) return 'Banking/Financial';
+  if(/steel|cement|metal|auto|motor/.test(n)) return 'Manufacturing';
+  if(/tech|soft|infosys|tcs|it services/.test(n)) return 'IT/Tech';
+  return 'Other';
+}
+/* Maps the display-oriented sniffed sector label to the SECTOR_INFO key
+   that picks the quant model (Z-score variant, Graham applicability, etc.) */
+function sectorKeyFromLabel(label){
+  return{'Banking/Financial':'banking','Healthcare':'healthcare','Energy/Power':'renewable',
+    'Manufacturing':'manufacturing','IT/Tech':'consumption'}[label] || 'general';
+}
+</script>
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   SHARED: FETCH DIRECTLY FROM SCREENER.IN  (bypasses the login-gated
+   Excel export). Used by both the single-stock "Fetch" tab and the
+   portfolio mode's per-holding fetch. Two paths tried in order:
+    1. r.jina.ai text-reader proxy — direct browser fetch, returns the
+       page pre-converted to markdown tables (robust to markup drift).
+    2. CORS-proxied raw HTML, parsed with DOMParser + label-matched rows.
+   Both are explicitly best-effort/beta — on failure we surface the
+   actual status/response we saw so a failure can be diagnosed, and the
+   caller falls back to "upload the Excel" rather than guessing numbers.
+   KNOWN LIMITATION: the free public page shows a coarser Balance Sheet
+   than the Excel export for some companies (e.g. no separate
+   Receivables line) — ratios that depend on it may read N/A here even
+   when the Excel export would have them.
+   ════════════════════════════════════════════════════════════════════ */
+const CORS_PROXIES=[
+  u=>'https://api.allorigins.win/get?url='+encodeURIComponent(u),
+  u=>'https://corsproxy.io/?url='+encodeURIComponent(u),
+];
+
+function numFromText(t){
+  if(t==null) return null;
+  const cleaned=String(t).replace(/,/g,'').replace(/%/g,'').replace(/₹/g,'').trim();
+  if(cleaned===''||cleaned==='-') return null;
+  const n=parseFloat(cleaned);
+  return isNaN(n)?null:n;
+}
+function findRow(rows,...patterns){
+  for(const key of Object.keys(rows)){ if(patterns.some(p=>key.includes(p))) return rows[key]; }
+  return [];
+}
+
+async function fetchScreenerData(ticker,timeoutMs=20000){
+  const url='https://www.screener.in/company/'+encodeURIComponent(ticker)+'/consolidated/';
+  const debug={ticker,url};
+
+  try{
+    const ctrl=new AbortController();
+    const t=setTimeout(()=>ctrl.abort(),timeoutMs);
+    const resp=await fetch('https://r.jina.ai/'+url,{signal:ctrl.signal});
+    clearTimeout(t);
+    debug.jinaStatus=resp.status;
+    if(resp.ok){
+      const md=await resp.text();
+      debug.jinaLength=md.length;
+      debug.jinaSnippet=md.slice(0,180);
+      if(md && md.length>300) return {format:'markdown',raw:md,debug};
+    }
+  }catch(e){ debug.jinaError=e.message; }
+
+  for(const build of CORS_PROXIES){
+    try{
+      const proxied=build(url);
+      const ctrl=new AbortController();
+      const t=setTimeout(()=>ctrl.abort(),15000);
+      const resp=await fetch(proxied,{signal:ctrl.signal});
+      clearTimeout(t);
+      debug.proxyStatus=(debug.proxyStatus||[]);
+      debug.proxyStatus.push(proxied.split('?')[0]+': '+resp.status);
+      if(!resp.ok) continue;
+      const ct=resp.headers.get('content-type')||'';
+      let html;
+      if(ct.includes('application/json')){ const j=await resp.json(); html=j.contents; }
+      else { html=await resp.text(); }
+      debug.htmlLength=html?html.length:0;
+      if(html && html.length>500) return {format:'html',raw:html,debug};
+    }catch(e){ debug.proxyError=(debug.proxyError?debug.proxyError+' | ':'')+e.message; }
+  }
+
+  throw Object.assign(
+    new Error('Could not fetch Screener data for "'+ticker+'" — every fetch path failed (see details). Screener may be blocking automated requests, the reader/proxy services may be down, or the ticker didn\u2019t resolve. Upload the Excel export for this holding instead.'),
+    {debug}
+  );
+}
+
+function extractMdSection(md,headingPattern){
+  const re=new RegExp('##\\s*'+headingPattern+'[\\s\\S]*?(?=\\n##\\s|$)','i');
+  const m=md.match(re);
+  return m?m[0]:'';
+}
+function parseMdTable(block){
+  const lines=block.split('\n').map(l=>l.trim()).filter(l=>l.startsWith('|'));
+  const rows={}; let headers=null;
+  for(const line of lines){
+    const cells=line.split('|').slice(1,-1).map(c=>c.trim());
+    if(cells.length===0) continue;
+    if(cells.every(c=>/^:?-{1,}:?$/.test(c)||c==='')) continue;
+    if(headers===null){ headers=cells.slice(1); continue; }
+    const label=cells[0].replace(/\+/g,'').replace(/\u00a0/g,' ').trim().toLowerCase();
+    if(!label) continue;
+    rows[label]=cells.slice(1).map(numFromText);
+  }
+  return {headers:headers||[],rows};
+}
+function extractNum(text){
+  const m=text.match(/[\d][\d,]*\.?\d*/);
+  return m?numFromText(m[0]):null;
+}
+function parseTopRatiosMd(md){
+  const map={};
+  const intro=md.split(/\n##\s/)[0];
+  intro.split('\n').forEach(line=>{
+    const l=line.trim();
+    if(!l.startsWith('-')) return;
+    const text=l.replace(/^-+\s*/,'');
+    const lower=text.toLowerCase();
+    if(lower.startsWith('market cap')) map.mktCap=extractNum(text);
+    else if(lower.startsWith('current price')) map.cmp=extractNum(text);
+    else if(lower.startsWith('stock p/e')) map.trailingPE=extractNum(text);
+    else if(lower.startsWith('book value')) map.bookValue=extractNum(text);
+    else if(lower.startsWith('face value')) map.faceValue=extractNum(text);
+  });
+  return map;
+}
+function parseScreenerMarkdown(md,tickerHint){
+  const h1=md.match(/^#\s+(.+)$/m);
+  const companyName=(h1?h1[1]:tickerHint||'Company').trim();
+  const ratios=parseTopRatiosMd(md);
+
+  const pl=parseMdTable(extractMdSection(md,'Profit\\s*&?\\s*Loss'));
+  const bs=parseMdTable(extractMdSection(md,'Balance\\s*Sheet'));
+  const cf=parseMdTable(extractMdSection(md,'Cash\\s*Flows?'));
+
+  const years=pl.headers;
+  const sales=findRow(pl.rows,'sales','revenue','interest earned','interest income');
+  const opProfitDirect=findRow(pl.rows,'operating profit');
+  const opmDirect=findRow(pl.rows,'opm');
+  const otherInc=findRow(pl.rows,'other income');
+  const interest=findRow(pl.rows,'interest');
+  const depreciation=findRow(pl.rows,'depreciation');
+  const pbt=findRow(pl.rows,'profit before tax');
+  const tax=findRow(pl.rows,'tax');
+  const pat=findRow(pl.rows,'net profit','profit after tax');
+  const eps=findRow(pl.rows,'eps');
+
+  if(!sales.length || sales.every(v=>v==null))
+    throw new Error('Fetched the page but could not find a Profit & Loss table in it — Screener\u2019s layout may differ for this company/page, or the reader returned something unexpected. Upload the Excel export instead.');
+
+  const bsYears=bs.headers;
+  const equityCap=findRow(bs.rows,'equity capital','share capital');
+  const reserves=findRow(bs.rows,'reserves');
+  const borrowings=findRow(bs.rows,'borrowings');
+  const otherLiab=findRow(bs.rows,'other liabilities');
+  const totalAssets=findRow(bs.rows,'total assets','total liabilities');
+  const cash=findRow(bs.rows,'cash equivalents','cash & bank','investments');
+  const receivables=findRow(bs.rows,'receivables','trade receivables');
+
+  const cfo=findRow(cf.rows,'cash from operating','operating activity');
+  const cfi=findRow(cf.rows,'cash from investing','investing activity');
+
+  const equity=equityCap.map((e,i)=>parseFloat(((e||0)+(reserves[i]||0)).toFixed(2)));
+  const opProfit=opProfitDirect.length?opProfitDirect:sales.map(()=>null);
+  const opm=opmDirect.length?opmDirect:sales.map((s,i)=>s&&opProfit[i]!=null?parseFloat((opProfit[i]/s*100).toFixed(1)):null);
+  const ebit=opProfit.map((op,i)=>(op!=null&&otherInc[i]!=null&&depreciation[i]!=null)?parseFloat((op+otherInc[i]-depreciation[i]).toFixed(2)):null);
+  function cagr(nv,ov,y){if(!nv||!ov||ov<=0)return null;return parseFloat(((Math.pow(nv/ov,1/y)-1)*100).toFixed(1));}
+  const lsales=sales.filter(v=>v!=null),lpat=pat.filter(v=>v!=null);
+  const salesCagr3=lsales.length>=4?cagr(lsales.at(-1),lsales.at(-4),3):null;
+  const patCagr3=lpat.length>=4?cagr(lpat.at(-1),lpat.at(-4),3):null;
+
+  const deRatio=equity.map((eq,i)=>eq&&borrowings[i]!=null?parseFloat((borrowings[i]/eq).toFixed(2)):null);
+  const roe=equity.map((eq,i)=>{const p=i<pat.length?pat[i]:pat.at(-1);return eq&&p?parseFloat((p/eq*100).toFixed(1)):null;});
+  const totalLiab=totalAssets.map((t,i)=>(t!=null&&equity[i]!=null)?parseFloat((t-equity[i]).toFixed(2)):null);
+  const currentAssets=receivables.map((r,i)=>parseFloat(((r||0)+(cash[i]||0)).toFixed(2)));
+  const currentLiab=otherLiab;
+  const workingCap=currentAssets.map((ca,i)=>(ca!=null&&currentLiab[i]!=null)?parseFloat((ca-currentLiab[i]).toFixed(2)):null);
+  const currentRatio=currentAssets.map((ca,i)=>(ca!=null&&currentLiab[i]&&currentLiab[i]>0)?parseFloat((ca/currentLiab[i]).toFixed(2)):null);
+  const ddays=sales.map((s,i)=>(s&&receivables[i]&&s>0)?parseFloat((receivables[i]/(s/365)).toFixed(1)):null);
+  const fcf=cfo.map((c,i)=>(c!=null&&cfi[i]!=null)?parseFloat((c+cfi[i]).toFixed(2)):null);
+
+  const cmp=ratios.cmp??null, mktCap=ratios.mktCap??null, faceValue=ratios.faceValue??null, trailingPE=ratios.trailingPE??null;
+  const trailingPB=(ratios.bookValue&&cmp)?parseFloat((cmp/ratios.bookValue).toFixed(2)):null;
+  const sharesCr=(cmp&&mktCap)?parseFloat((mktCap/cmp).toFixed(2)):null;
+
+  return {
+    meta:{companyName,faceValue,cmp,mktCap,sharesCr,trailingPE,trailingPB,trailingPS:null,advRowsVerified:true,
+      looksLikeBank:/interest earned|interest income/.test(Object.keys(pl.rows).join(' '))},
+    annual:{years,sales,opProfit,opm,pat,npm:sales.map((s,i)=>s&&pat[i]!=null?parseFloat((pat[i]/s*100).toFixed(1)):null),
+      eps,depreciation,interest,otherIncome:otherInc,salesCagr3,salesCagr5:null,patCagr3,pbt,tax,ebit,divPayout:sales.map(()=>null),fcf},
+    quarterly:{periods:[],sales:[],opProfit:[],opm:[],pat:[],lastQLabel:'',lastQSales:null,lastQPat:null,lastQOpm:null,yoyQSales:null,yoyQPat:null},
+    balanceSheet:{years:bsYears,equity,borr:borrowings,total:totalAssets,cash,recv:receivables,inventory:[],netBlock:[],
+      roe,deRatio,ddays,reserves,otherLiab,totalLiab,currentAssets,currentLiab,workingCap,currentRatio,quickRatio:currentAssets.map(()=>null)},
+    cashFlow:{years:[],ops:cfo,investing:cfi,financing:[]},
+    sourceNote:'fetched from screener.in via markdown reader (beta — verify against the Excel export if a number looks off; the free page shows a coarser balance sheet than the Excel export for some companies)',
+  };
+}
+
+function tableToRows(table){
+  const rows={};
+  const trs=table.querySelectorAll('tr');
+  let headers=[];
+  trs.forEach((tr,i)=>{
+    const cells=Array.from(tr.querySelectorAll('th,td')).map(td=>td.textContent.trim());
+    if(cells.length===0) return;
+    if(i===0){ headers=cells.slice(1); return; }
+    const label=cells[0].replace(/\+|\u00a0/g,' ').trim().toLowerCase();
+    rows[label]=cells.slice(1).map(numFromText);
+  });
+  return {headers,rows};
+}
+async function parseScreenerHTML(html,tickerHint){
+  const doc=new DOMParser().parseFromString(html,'text/html');
+
+  const companyName=(doc.querySelector('h1')?.textContent||tickerHint||'Company').trim();
+  const ratioMap={};
+  doc.querySelectorAll('#top-ratios li, .company-ratios li, ul#top-ratios li').forEach(li=>{
+    const name=li.querySelector('.name')?.textContent?.trim()?.toLowerCase();
+    const val=li.querySelector('.value, .nowrap')?.textContent?.trim();
+    if(name) ratioMap[name]=numFromText(val);
+  });
+  const cmp=ratioMap['current price']??null;
+  const mktCap=ratioMap['market cap']??null;
+  const faceValue=ratioMap['face value']??null;
+  const trailingPE=ratioMap['stock p/e']??ratioMap['p/e']??null;
+  const trailingPB=ratioMap['book value']&&cmp?parseFloat((cmp/ratioMap['book value']).toFixed(2)):null;
+  const sharesCr=cmp&&mktCap?parseFloat((mktCap/cmp).toFixed(2)):null;
+
+  function sectionTable(id){
+    const sec=doc.querySelector('#'+id)||Array.from(doc.querySelectorAll('section')).find(s=>(s.getAttribute('id')||'').includes(id));
+    const tbl=sec?sec.querySelector('table'):null;
+    return tbl?tableToRows(tbl):{headers:[],rows:{}};
+  }
+
+  const pl=sectionTable('profit-loss');
+  const years=pl.headers;
+  const sales=findRow(pl.rows,'sales','revenue','interest earned','interest income');
+  const opProfitDirect=findRow(pl.rows,'operating profit');
+  const opmDirect=findRow(pl.rows,'opm');
+  const otherInc=findRow(pl.rows,'other income');
+  const interest=findRow(pl.rows,'interest');
+  const depreciation=findRow(pl.rows,'depreciation');
+  const pbt=findRow(pl.rows,'profit before tax');
+  const tax=findRow(pl.rows,'tax');
+  const pat=findRow(pl.rows,'net profit','profit after tax');
+  const eps=findRow(pl.rows,'eps');
+
+  const bsT=sectionTable('balance-sheet');
+  const bsYears=bsT.headers;
+  const equityCap=findRow(bsT.rows,'equity capital','share capital');
+  const reserves=findRow(bsT.rows,'reserves');
+  const borrowings=findRow(bsT.rows,'borrowings');
+  const otherLiab=findRow(bsT.rows,'other liabilities');
+  const totalAssets=findRow(bsT.rows,'total assets','total liabilities');
+  const cash=findRow(bsT.rows,'cash equivalents','cash & bank','investments');
+  const receivables=findRow(bsT.rows,'receivables');
+
+  const cfT=sectionTable('cash-flow');
+  const cfo=findRow(cfT.rows,'cash from operating','operating activity');
+  const cfi=findRow(cfT.rows,'cash from investing','investing activity');
+
+  if(!sales.length || sales.every(v=>v==null))
+    throw new Error('Could not locate the Profit & Loss table on the fetched page — Screener\u2019s markup may have changed, or the ticker/page didn\u2019t resolve. Upload the Excel export for this holding instead.');
+
+  const equity=equityCap.map((e,i)=>parseFloat(((e||0)+(reserves[i]||0)).toFixed(2)));
+  const opProfit=opProfitDirect.length?opProfitDirect:sales.map(()=>null);
+  const opm=opmDirect.length?opmDirect:sales.map((s,i)=>s&&opProfit[i]!=null?parseFloat((opProfit[i]/s*100).toFixed(1)):null);
+  const ebit=opProfit.map((op,i)=>(op!=null&&otherInc[i]!=null&&depreciation[i]!=null)?parseFloat((op+otherInc[i]-depreciation[i]).toFixed(2)):null);
+  function cagr(nv,ov,y){if(!nv||!ov||ov<=0)return null;return parseFloat(((Math.pow(nv/ov,1/y)-1)*100).toFixed(1));}
+  const lsales=sales.filter(v=>v!=null),lpat=pat.filter(v=>v!=null);
+  const salesCagr3=lsales.length>=4?cagr(lsales.at(-1),lsales.at(-4),3):null;
+  const patCagr3=lpat.length>=4?cagr(lpat.at(-1),lpat.at(-4),3):null;
+
+  const deRatio=equity.map((eq,i)=>eq&&borrowings[i]!=null?parseFloat((borrowings[i]/eq).toFixed(2)):null);
+  const roe=equity.map((eq,i)=>{const p=i<pat.length?pat[i]:pat.at(-1);return eq&&p?parseFloat((p/eq*100).toFixed(1)):null;});
+  const totalLiab=totalAssets.map((t,i)=>(t!=null&&equity[i]!=null)?parseFloat((t-equity[i]).toFixed(2)):null);
+  const currentAssets=receivables.map((r,i)=>parseFloat(((r||0)+(cash[i]||0)).toFixed(2)));
+  const currentLiab=otherLiab;
+  const workingCap=currentAssets.map((ca,i)=>(ca!=null&&currentLiab[i]!=null)?parseFloat((ca-currentLiab[i]).toFixed(2)):null);
+  const currentRatio=currentAssets.map((ca,i)=>(ca!=null&&currentLiab[i]&&currentLiab[i]>0)?parseFloat((ca/currentLiab[i]).toFixed(2)):null);
+  const ddays=sales.map((s,i)=>(s&&receivables[i]&&s>0)?parseFloat((receivables[i]/(s/365)).toFixed(1)):null);
+  const fcf=cfo.map((c,i)=>(c!=null&&cfi[i]!=null)?parseFloat((c+cfi[i]).toFixed(2)):null);
+
+  return {
+    meta:{companyName,faceValue,cmp,mktCap,sharesCr,trailingPE,trailingPB,trailingPS:null,advRowsVerified:true,
+      looksLikeBank:sales!==findRow(pl.rows,'sales')},
+    annual:{years,sales,opProfit,opm,pat,npm:sales.map((s,i)=>s&&pat[i]!=null?parseFloat((pat[i]/s*100).toFixed(1)):null),
+      eps,depreciation,interest,otherIncome:otherInc,salesCagr3,salesCagr5:null,patCagr3,pbt,tax,ebit,divPayout:sales.map(()=>null),fcf},
+    quarterly:{periods:[],sales:[],opProfit:[],opm:[],pat:[],lastQLabel:'',lastQSales:null,lastQPat:null,lastQOpm:null,yoyQSales:null,yoyQPat:null},
+    balanceSheet:{years:bsYears,equity,borr:borrowings,total:totalAssets,cash,recv:receivables,inventory:[],netBlock:[],
+      roe,deRatio,ddays,reserves,otherLiab,totalLiab,currentAssets,currentLiab,workingCap,currentRatio,quickRatio:currentAssets.map(()=>null)},
+    cashFlow:{years:[],ops:cfo,investing:cfi,financing:[]},
+    sourceNote:'fetched from screener.in (beta — verify against the Excel export if a number looks off)',
+  };
+}
+
+async function fetchAndParseScreener(ticker){
+  const {format,raw:src}=await fetchScreenerData(ticker);
+  const parsed = format==='markdown' ? parseScreenerMarkdown(src,ticker) : await parseScreenerHTML(src,ticker);
+  return parsed;
+}
+</script>
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   SINGLE-STOCK MODE
+   ════════════════════════════════════════════════════════════════════ */
+let sFiles={xlsx:null,pdf1:null,pdf2:null,peers:[]};
+let sFetchedData=null;
+let sSourceMode='xlsx';
+let sDocxBlob=null;
+let sLogLines=[];
+let sPreParsedXlsx=null;   // {file, data} cache so auto-sector-detect doesn't force a re-parse in sGenerate
+let sSectorTouched=false;  // true once the user picks a sector themselves — auto-detect then backs off
+let sFetchedPeers=[];      // peer companies added via ticker fetch (in addition to uploaded peer Excels)
+
+/* Reads the file just enough to auto-pick the sector dropdown, and caches
+   the parse so Generate doesn't have to redo it. Silent on failure — any
+   real problem with the file still surfaces clearly when Generate runs. */
+async function sAutoDetectSectorFromFile(f){
+  try{
+    await window.__xlsxReady;
+    const buf=await f.arrayBuffer();
+    const parsed=parseExcel(new Uint8Array(buf));
+    sPreParsedXlsx={file:f,data:parsed};
+    sApplyAutoSector(parsed.meta,parsed.annual);
+  }catch(e){ /* leave sector on manual/default — sGenerate will report the real error */ }
+}
+function sApplyAutoSector(m,a){
+  if(sSectorTouched) return;
+  const key=sectorKeyFromLabel(sniffSector(m,a));
+  document.getElementById('s-sector-select').value=key;
+  const note=document.getElementById('s-sector-auto-note');
+  if(note){ note.style.display='block'; note.textContent='Auto-detected as '+SECTOR_INFO[key].label+' — change above if that looks wrong.'; }
+}
+
+async function sFetchPeer(){
+  const raw=document.getElementById('s-peer-fetch-ticker').value.trim();
+  if(!raw) return;
+  const ticker=raw.toUpperCase().replace(/\s+/g,'');
+  const btn=document.getElementById('s-peer-fetch-btn');
+  btn.disabled=true; btn.textContent='Fetching…';
+  try{
+    const parsed=await fetchAndParseScreener(ticker);
+    sFetchedPeers.push(parsed);
+    document.getElementById('s-peer-fetch-ticker').value='';
+    sRenderPeerChips();
+  }catch(e){ showErr('s','Could not fetch peer "'+ticker+'": '+e.message); }
+  finally{ btn.disabled=false; btn.textContent='+ Add Peer'; }
+}
+function sRenderPeerChips(){
+  const box=document.getElementById('s-peer-chips');
+  box.innerHTML=sFetchedPeers.map((p,i)=>
+    `<span class="tag tag-a">${p.meta.companyName} <a href="#" onclick="event.preventDefault();sFetchedPeers.splice(${i},1);sRenderPeerChips();" style="color:inherit;text-decoration:none;font-weight:700;margin-left:4px">✕</a></span>`
+  ).join('');
+}
+
+function sSetSourceTab(mode){
+  sSourceMode=mode;
+  document.getElementById('s-srctab-xlsx').classList.toggle('active',mode==='xlsx');
+  document.getElementById('s-srctab-fetch').classList.toggle('active',mode==='fetch');
+  document.getElementById('s-src-xlsx').style.display=mode==='xlsx'?'block':'none';
+  document.getElementById('s-src-fetch').style.display=mode==='fetch'?'block':'none';
+  sUpdateGenBtn();
+}
+function sUpdateGenBtn(){
+  const ready=(sSourceMode==='xlsx'&&sFiles.xlsx)||(sSourceMode==='fetch'&&sFetchedData);
+  document.getElementById('s-gen-btn').disabled=!ready;
+}
+
+function sOnFile(type,inp){
+  if(type==='peers'){
+    const fs=inp.files; if(!fs||fs.length===0) return;
+    sFiles.peers=Array.from(fs);
+    document.getElementById('s-dz-peers').classList.add('ready');
+    document.getElementById('s-fn-peers').textContent=fs.length+' file(s) selected';
+    return;
+  }
+  const f=inp.files[0]; if(!f)return;
+  sFiles[type]=f;
+  document.getElementById('s-dz-'+type).classList.add('ready');
+  document.getElementById('s-dz-'+type).classList.remove('mandatory');
+  document.getElementById('s-fn-'+type).textContent=f.name;
+  if(type==='xlsx'){
+    sUpdateGenBtn();
+    sPreParsedXlsx=null;
+    sAutoDetectSectorFromFile(f);
+  }
+}
+
+async function sFetchTicker(){
+  const raw=document.getElementById('s-fetch-ticker').value.trim();
+  if(!raw){ showErr('s','Enter a company name or NSE/BSE ticker to fetch.'); return; }
+  hideErr('s');
+  const statusEl=document.getElementById('s-fetch-status');
+  const btn=document.getElementById('s-fetch-btn');
+  if(btn) btn.disabled=true;
+  statusEl.style.color='var(--muted)';
+  statusEl.textContent='Fetching '+raw+'…';
+  try{
+    const ticker=raw.toUpperCase().replace(/\s+/g,'');
+    const parsed=await fetchAndParseScreener(ticker);
+    sFetchedData=parsed;
+    statusEl.style.color='var(--green)';
+    statusEl.textContent='✓ Fetched '+parsed.meta.companyName+' — ready to analyse.';
+    sApplyAutoSector(parsed.meta,parsed.annual);
+    sUpdateGenBtn();
+  }catch(e){
+    sFetchedData=null;
+    statusEl.style.color='var(--red)';
+    statusEl.textContent='✗ '+e.message;
+    sUpdateGenBtn();
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
+
 function buildPositives(sc,m,a,bs,cf,zRes,oRes,duRes){
   const res=[];
   const sc3=safe(a.salesCagr3),pc3=safe(a.patCagr3),opm=safe(last(a.opm));
@@ -938,7 +1430,7 @@ function buildPositives(sc,m,a,bs,cf,zRes,oRes,duRes){
   const cash=safe(last(bs.cash)),borr=safe(last(bs.borr));
   const cfo=last(cf.ops),pat=last(a.pat);
   const sales=(a.sales||[]).filter(v=>v!=null);
-  
+
   if(sc3>15)res.push({t:'Strong Revenue CAGR',d:`Revenue compounded at ${sc3}% over 3 years — well above nominal GDP growth, indicating consistent market share gains.`});
   if(pc3>sc3)res.push({t:'Operating Leverage',d:`PAT CAGR ${pc3}% outpaces revenue CAGR ${sc3}% — scale translating to disproportionate profit growth.`});
   if(opm>15)res.push({t:`Healthy OPM (${opm}%)`,d:`OPM of ${opm}% reflects strong pricing power and cost discipline.`});
@@ -948,16 +1440,13 @@ function buildPositives(sc,m,a,bs,cf,zRes,oRes,duRes){
   if(cfo&&pat&&cfo>pat*0.9)res.push({t:'High Quality Earnings',d:'Operating cash flow closely tracks PAT — earnings are not paper entries.'});
   if(trend(a.opm)==='improving')res.push({t:'Margin Expansion Trend',d:'OPM on a consistent upward trend — better product mix or pricing gains driving this.'});
   if(sales.length>=3&&sales.every((v,i)=>i===0||v>=sales[i-1]))res.push({t:'Unbroken Revenue Growth',d:`Revenue has grown every year across all ${sales.length} available years.`});
-  
   if(last(a.fcf)>0)res.push({t:'Positive Free Cash Flow',d:`Consistently generating positive FCF (latest: ₹${fmtCr(last(a.fcf))} Cr) to fund growth or return capital.`});
   if(last(bs.currentRatio)>1.5)res.push({t:'Strong Liquidity',d:`Current ratio of ${last(bs.currentRatio).toFixed(1)}x shows robust short-term liquidity.`});
-  
   if(zRes.applicable&&zRes.zone==='Safe')res.push({t:`${zRes.model.split('(')[0].trim()} — Safe Zone`,d:`Score of ${zRes.value} sits comfortably in the safe zone (>${zRes.zoneThresholds.safe}) — low statistical bankruptcy risk over a 2-year horizon.`});
   if(oRes.applicable&&oRes.status==='Healthy')res.push({t:'Low Ohlson Default Probability',d:`Modelled probability of distress is just ${oRes.probability}%, reinforcing the balance-sheet strength read elsewhere in this report.`});
   if(duRes.applicable&&!duRes.redFlag&&duRes.roe>15)res.push({t:'DuPont-Verified Quality ROE',d:`The ${duRes.roe}% ROE decomposes into healthy operating margin and asset-turnover contributions rather than excess leverage — this is "clean" ROE.`});
   return res.slice(0,8);
 }
-
 function buildNegatives(sc,m,a,bs,cf,zRes,oRes,duRes){
   const res=[];
   const sc3=safe(a.salesCagr3),opm=safe(last(a.opm)),roe=safe(last(bs.roe));
@@ -975,192 +1464,144 @@ function buildNegatives(sc,m,a,bs,cf,zRes,oRes,duRes){
   if(negPat>=2)res.push({t:'Inconsistent Profit Track Record',d:`PAT declined YoY in ${negPat} of last ${pats.length-1} years — cyclicality or recurring charges.`});
   if(trend(a.opm)==='declining')res.push({t:'Margin Compression Trend',d:'OPM declining — rising input costs, pricing pressure, or deteriorating business mix.'});
   if(sc3<8)res.push({t:'Sluggish Revenue Growth',d:`3Y revenue CAGR of ${sc3}% is modest and may struggle to outpace inflation.`});
-  
   if(zRes.applicable&&zRes.zone==='Distress')res.push({t:`${zRes.model.split('(')[0].trim()} — Distress Zone`,d:`Score of ${zRes.value} is below the ${zRes.zoneThresholds.distress} distress threshold — statistically elevated bankruptcy risk over a 2-year horizon. Treat as a screen to investigate further, not a verdict on its own.`});
   if(oRes.applicable&&oRes.status==='Elevated Risk')res.push({t:'Elevated Ohlson Default Probability',d:`Modelled probability of distress is ${oRes.probability}% — above the 50% threshold used as an institutional survival screen.`});
   if(duRes.applicable&&duRes.redFlag)res.push({t:'DuPont Red Flag: Leverage-Masked ROE',d:duRes.flagNote});
   return res.slice(0,8);
 }
-
 function buildPeers(m,a,bs,subjVal,peerData){
-  const pe = safe(m.trailingPE), opm = safe(last(a.opm)), sc3 = safe(a.salesCagr3);
-  const roe = safe(last(bs.roe)), de = safe(last(bs.deRatio)), pb = safe(m.trailingPB);
-  const eveb = subjVal.evMult ? subjVal.evMult.toFixed(1)+'x' : '—';
-  
+  const pe=safe(m.trailingPE), opm=safe(last(a.opm)), sc3=safe(a.salesCagr3);
+  const roe=safe(last(bs.roe)), de=safe(last(bs.deRatio)), pb=safe(m.trailingPB);
+  const eveb=subjVal.evMult?subjVal.evMult.toFixed(1)+'x':'—';
   const subj={name:m.companyName+' ✦', pe:pe?pe.toFixed(1)+'x':'—', pb:pb?pb.toFixed(1)+'x':'—', eveb, roe:roe?roe.toFixed(1)+'%':'—', opm:opm?opm.toFixed(1)+'%':'—', cagr3:sc3?sc3+'%':'—', de:de?de.toFixed(2)+'x':'—', highlight:true};
   const peers=[subj];
-  
-  // Auto peers from file
-  if (peerData && peerData.length > 0) {
-      peerData.forEach(pd => {
-          const p_pe = safe(pd.meta.trailingPE);
-          const p_pb = safe(pd.meta.trailingPB);
-          const p_opm = safe(last(pd.annual.opm));
-          const p_sc3 = safe(pd.annual.salesCagr3);
-          const p_roe = safe(last(pd.balanceSheet.roe));
-          const p_de = safe(last(pd.balanceSheet.deRatio));
-          const p_val = buildVal(pd.meta, pd.annual, pd.balanceSheet);
-          const p_eveb = p_val.evMult ? p_val.evMult.toFixed(1)+'x' : '—';
-          
-          peers.push({
-              name: pd.meta.companyName,
-              pe: p_pe ? p_pe.toFixed(1)+'x' : '—',
-              pb: p_pb ? p_pb.toFixed(1)+'x' : '—',
-              eveb: p_eveb,
-              roe: p_roe ? p_roe.toFixed(1)+'%' : '—',
-              opm: p_opm ? p_opm.toFixed(1)+'%' : '—',
-              cagr3: p_sc3 ? p_sc3+'%' : '—',
-              de: p_de ? p_de.toFixed(2)+'x' : '—',
-              highlight: false
-          });
-      });
+  if(peerData && peerData.length>0){
+    peerData.forEach(pd=>{
+      const p_pe=safe(pd.meta.trailingPE), p_pb=safe(pd.meta.trailingPB), p_opm=safe(last(pd.annual.opm));
+      const p_sc3=safe(pd.annual.salesCagr3), p_roe=safe(last(pd.balanceSheet.roe)), p_de=safe(last(pd.balanceSheet.deRatio));
+      const p_val=buildVal(pd.meta,pd.annual,pd.balanceSheet);
+      const p_eveb=p_val.evMult?p_val.evMult.toFixed(1)+'x':'—';
+      peers.push({name:pd.meta.companyName, pe:p_pe?p_pe.toFixed(1)+'x':'—', pb:p_pb?p_pb.toFixed(1)+'x':'—', eveb:p_eveb,
+        roe:p_roe?p_roe.toFixed(1)+'%':'—', opm:p_opm?p_opm.toFixed(1)+'%':'—', cagr3:p_sc3?p_sc3+'%':'—', de:p_de?p_de.toFixed(2)+'x':'—', highlight:false});
+    });
   }
-
-  // Manual peers (if any)
   for(let i=1;i<=4;i++){
-    const nm=document.getElementById('p'+i+'n')?.value?.trim();
-    const dt=document.getElementById('p'+i+'d')?.value?.trim();
+    const nm=document.getElementById('s-p'+i+'n')?.value?.trim();
+    const dt=document.getElementById('s-p'+i+'d')?.value?.trim();
     if(nm){
-        const pts=dt?dt.split('·').map(s=>s.trim()):[];
-        peers.push({name:nm, pe:pts[0]||'—', pb:'—', eveb:'—', roe:pts[1]||'—', opm:pts[2]||'—', cagr3:'—', de:'—', highlight:false});
+      const pts=dt?dt.split('·').map(s=>s.trim()):[];
+      peers.push({name:nm, pe:pts[0]||'—', pb:'—', eveb:'—', roe:pts[1]||'—', opm:pts[2]||'—', cagr3:'—', de:'—', highlight:false});
     }
   }
   return peers;
 }
 
-// ─── Main generate flow ───────────────────────────────────────────────────────
-async function generate(){
-  if(!files.xlsx){showErr('Please upload the screener.in Excel file first.');return;}
-  hideErr();
-  const sector=document.getElementById('sector-select').value;
-  const qualMgmt=document.getElementById('qual-mgmt').value;
-  const qualEsg=document.getElementById('qual-esg').value;
-  
-  document.getElementById('upload-card').style.display='none';
-  document.getElementById('prog-card').style.display='block';
-  setStep(2);logLines=[];
+async function sGenerate(){
+  hideErr('s');
+  if(sSourceMode==='xlsx'&&!sFiles.xlsx){ showErr('s','Please upload the screener.in Excel file first.'); return; }
+  if(sSourceMode==='fetch'&&!sFetchedData){ showErr('s','Fetch a company first, or switch to the Upload Excel tab.'); return; }
+
+  const sector=document.getElementById('s-sector-select').value;
+  const qualMgmt=document.getElementById('s-qual-mgmt').value;
+  const qualEsg=document.getElementById('s-qual-esg').value;
+
+  document.getElementById('s-upload-card').style.display='none';
+  document.getElementById('s-prog-card').style.display='block';
+  sSetStep(2); sLogLines=[];
 
   try{
-    await log('Loading Excel and Word libraries...',4);
-    try{
-      await window.__xlsxReady;
-    }catch(e){
-      throw new Error('Could not load the Excel-reading library from either source (cdnjs or jsdelivr). This is usually a network policy or ad-blocker blocking script CDNs - check your connection, try disabling content-blocking extensions for this page, or try a different network, then reload the page.');
-    }
-    try{
-      await window.__docxReady;
-    }catch(e){
-      throw new Error('Could not load the Word-report library from either source (unpkg or jsdelivr). This is usually a network policy or ad-blocker blocking script CDNs - check your connection, try disabling content-blocking extensions for this page, or try a different network, then reload the page.');
-    }
+    await sLog('Loading Excel and Word libraries...',4);
+    try{ await window.__xlsxReady; }
+    catch(e){ throw new Error('Could not load the Excel-reading library from either source (cdnjs or jsdelivr). This is usually a network policy or ad-blocker blocking script CDNs - check your connection, try disabling content-blocking extensions for this page, or try a different network, then reload the page.'); }
+    try{ await window.__docxReady; }
+    catch(e){ throw new Error('Could not load the Word-report library from either source (unpkg or jsdelivr). This is usually a network policy or ad-blocker blocking script CDNs - check your connection, try disabling content-blocking extensions for this page, or try a different network, then reload the page.'); }
 
-    await log('Reading Excel file...',8);
-    const buf=await files.xlsx.arrayBuffer();
-    const arr=new Uint8Array(buf);
-
-    await log('Parsing financial data from screener.in format...',20);
-    const data=parseExcel(arr);
-    
-    const peerData = [];
-    if (files.peers && files.peers.length > 0) {
-        await log('Parsing competitor files...', 25);
-        for (const pf of files.peers) {
-            try {
-                const pBuf = await pf.arrayBuffer();
-                const pArr = new Uint8Array(pBuf);
-                const pParsed = parseExcel(pArr);
-                peerData.push(pParsed);
-            } catch(e) {
-                console.warn("Failed to parse peer file", pf.name, e);
-            }
-        }
+    let data;
+    if(sSourceMode==='xlsx'){
+      if(sPreParsedXlsx && sPreParsedXlsx.file===sFiles.xlsx){
+        await sLog('Using the data already parsed for sector auto-detection...',20);
+        data=sPreParsedXlsx.data;
+      } else {
+        await sLog('Reading Excel file...',8);
+        const buf=await sFiles.xlsx.arrayBuffer();
+        await sLog('Parsing financial data from screener.in format...',20);
+        data=parseExcel(new Uint8Array(buf));
+      }
+    } else {
+      await sLog('Using live-fetched data for '+sFetchedData.meta.companyName+'...',20);
+      data=sFetchedData;
     }
 
-    await log('Running 8-dimension scoring engine...',34);
-    const scores={
-      growth:scoreGrowth(data.annual,data.quarterly),
-      margins:scoreMargins(data.annual),
-      balanceSheet:scoreBS(data.balanceSheet),
-      cashflow:scoreCF(data.cashFlow,data.annual),
-      returns:scoreRet(data.balanceSheet),
-      workingCap:scoreWC(data.balanceSheet),
-      valuation:scoreVal(data.meta,data.annual),
-      consistency:scoreCons(data.annual),
-    };
+    const peerData=[...sFetchedPeers];
+    if(sFiles.peers && sFiles.peers.length>0){
+      await sLog('Parsing competitor files...',25);
+      for(const pf of sFiles.peers){
+        try{ const pBuf=await pf.arrayBuffer(); peerData.push(parseExcel(new Uint8Array(pBuf))); }
+        catch(e){ console.warn('Failed to parse peer file',pf.name,e); }
+      }
+    }
 
-    await log('Deriving investment ratings...',44);
+    await sLog('Running 8-dimension scoring engine...',34);
+    const scores=scoreAll(data.annual,data.balanceSheet,data.cashFlow,data.meta,data.quarterly);
+
+    await sLog('Deriving investment ratings...',44);
     const ratings=deriveRatings(scores,data.meta,data.annual);
 
-    await log('Building valuation (P/E, EV/EBITDA, DCF)...',54);
+    await sLog('Building valuation (P/E, EV/EBITDA, DCF)...',54);
     const valuation=buildVal(data.meta,data.annual,data.balanceSheet);
 
-    await log('Computing Altman Z-Score & Ohlson O-Score...',64);
+    await sLog('Computing Altman Z-Score & Ohlson O-Score...',64);
     const zRes=calcAltmanZ(sector,data.annual,data.balanceSheet,data.meta);
     const oRes=calcOhlsonO(data.annual,data.balanceSheet);
 
-    await log('Running DuPont 5-step & Graham Number...',72);
+    await sLog('Running DuPont 5-step & Graham Number...',72);
     const duRes=calcDuPont5(data.annual,data.balanceSheet);
     const grahamRes=calcGrahamNumber(data.annual,data.balanceSheet,data.meta,sector);
     const filterRes=calc3StageFilter(zRes,oRes,duRes,grahamRes,data.annual,data.balanceSheet,data.meta,sector);
 
-    await log('Assembling investment strategy...',82);
+    await sLog('Assembling investment strategy...',82);
     const strategy=buildStrategy(ratings,data.meta,data.annual);
     const positives=buildPositives(scores,data.meta,data.annual,data.balanceSheet,data.cashFlow,zRes,oRes,duRes);
     const negatives=buildNegatives(scores,data.meta,data.annual,data.balanceSheet,data.cashFlow,zRes,oRes,duRes);
     const peers=buildPeers(data.meta,data.annual,data.balanceSheet,valuation,peerData);
-    data.annual.balanceSheet=data.balanceSheet;
 
     const fd={data,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector,qualMgmt,qualEsg};
 
-    await log('Rendering results...',90);
-    renderResults(fd);
+    await sLog('Rendering results...',90);
+    sRenderResults(fd);
 
-    await log('Building Word document...',96);
-    docxBlob=await buildDocx(fd);
-    document.getElementById('dl-btn').onclick=()=>dlDocx(docxBlob,data.meta.companyName);
+    await sLog('Building Word document...',96);
+    sDocxBlob=await sBuildDocx(fd);
+    document.getElementById('s-dl-btn').onclick=()=>sDlDocx(sDocxBlob,data.meta.companyName);
 
-    setProgress(100);
-    await log('Done! ✓',100);
-    document.getElementById('prog-card').style.display='none';
-    document.getElementById('res-card').style.display='block';
-    setStep(3);
+    sSetProgress(100);
+    await sLog('Done! ✓',100);
+    document.getElementById('s-prog-card').style.display='none';
+    document.getElementById('s-res-card').style.display='block';
+    sSetStep(3);
 
   }catch(e){
-    document.getElementById('prog-card').style.display='none';
-    document.getElementById('upload-card').style.display='block';
-    showErr('Error: '+e.message);
-    setStep(1);console.error(e);
+    document.getElementById('s-prog-card').style.display='none';
+    document.getElementById('s-upload-card').style.display='block';
+    showErr('s','Error: '+e.message);
+    sSetStep(1); console.error(e);
   }
 }
 
-async function log(msg,pct){
-  logLines.push(msg);
-  document.getElementById('plog').innerHTML=logLines.map((l,i)=>
-    `<div class="plog-line ${i===logLines.length-1?'cur':'done'}">${i===logLines.length-1?'▶':'✓'} ${l}</div>`
+async function sLog(msg,pct){
+  sLogLines.push(msg);
+  document.getElementById('s-plog').innerHTML=sLogLines.map((l,i)=>
+    `<div class="plog-line ${i===sLogLines.length-1?'cur':'done'}">${i===sLogLines.length-1?'▶':'✓'} ${l}</div>`
   ).join('');
-  setProgress(pct);
+  sSetProgress(pct);
   await new Promise(r=>setTimeout(r,100));
 }
-function setProgress(p){document.getElementById('pbar').style.width=p+'%';}
-
-// ─── Render preview ───────────────────────────────────────────────────────────
-function ratingStyle(r=''){
-  const u=r.toUpperCase();
-  if(u.includes('STRONG BUY')||u.includes('BUY'))return'color:var(--green);background:var(--lgreen)';
-  if(u.includes('HOLD'))return'color:var(--amber);background:var(--lamber)';
-  return'color:var(--red);background:var(--lred)';
-}
-function scoreColor(v){if(v>=8)return'#15803d';if(v>=6)return'#0369a1';if(v>=4)return'#b45309';return'#b91c1c';}
-function fsClass(p){return p===true?'pass':(p===false?'fail':'na');}
-function fsIcon(p){return p===true?'✓':(p===false?'✗':'—');}
-function fsVerdict(p){return p===true?'PASS':(p===false?'FAIL':'N/A');}
-function zoneCss(zone){return zone==='Safe'?'zone-safe':(zone==='Grey'?'zone-grey':'zone-distress');}
-function zoneBadge(zone){
-  if(zone==='Safe')return'color:var(--green);background:var(--lgreen)';
-  if(zone==='Grey')return'color:var(--amber);background:var(--lamber)';
-  return'color:var(--red);background:var(--lred)';
-}
-
-function renderResults(fd){
+function sSetProgress(p){document.getElementById('s-pbar').style.width=p+'%';}
+function sSetStep(n){for(let i=1;i<=3;i++){const el=document.getElementById('s-step'+i);el.className='step';if(i<n)el.className='step done';if(i===n)el.className='step active';}}
+</script>
+<script>
+/* ── Single-stock: render preview ───────────────────────────────────── */
+function sRenderResults(fd){
   const{data:d,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector}=fd;
   const m=d.meta,ann=d.annual,qtr=d.quarterly,bs=d.balanceSheet,cf=d.cashFlow;
   let h='';
@@ -1170,12 +1611,8 @@ function renderResults(fd){
     <div class="cb-meta">CMP ₹${m.cmp} &nbsp;|&nbsp; Mkt Cap ₹${fmtCr(m.mktCap)} Cr &nbsp;|&nbsp; P/E ${m.trailingPE||'—'}x &nbsp;|&nbsp; P/B ${m.trailingPB||'—'}x &nbsp;|&nbsp; FV ₹${m.faceValue} &nbsp;|&nbsp; P/Sales ${m.trailingPS||'—'}x</div>
   </div>`;
 
-  if(m.looksLikeBank){
-    h+=`<div class="warn-box warn-bank">⚠ <strong>This looks like a Bank/NBFC</strong></div>`;
-  }
-  if(!m.advRowsVerified){
-    h+=`<div class="warn-box warn-rows">⚠ <strong>Advanced-model inputs auto-detected, not label-confirmed</strong></div>`;
-  }
+  if(m.looksLikeBank) h+=`<div class="warn-box">⚠ <strong>This looks like a Bank/NBFC</strong> — consider selecting the Banking sector above so the distress models are applied correctly.</div>`;
+  if(!m.advRowsVerified) h+=`<div class="warn-box">⚠ <strong>Advanced-model inputs auto-detected, not label-confirmed</strong> — double-check the PBT/Tax and Other-Liabilities rows against your export if the DuPont or 3-Stage Filter numbers look off.</div>`;
 
   h+=`<div class="ratings-strip">`;
   strategy.forEach(s=>{h+=`<div class="rat-box" style="${ratingStyle(s.rating)}"><div class="rat-h">${s.label}</div><div class="rat-call">${s.rating}</div><div class="rat-tgt">${s.target}</div><div class="rat-tgt">${s.upside}</div></div>`;});
@@ -1187,7 +1624,7 @@ function renderResults(fd){
     h+=`<div class="filter-stage ${fsClass(s.pass)}"><div class="fs-icon">${fsIcon(s.pass)}</div><div class="fs-label">${s.label}</div><div class="fs-verdict">${fsVerdict(s.pass)}</div><div class="fs-detail">${s.detail.length?s.detail.join('<br>'):'Insufficient data'}</div></div>`;
   });
   h+=`</div>`;
-  
+
   h+=`<div class="sec-label">Financial Health Scorecard</div>`;
   const snames={growth:'Growth',margins:'Margins',balanceSheet:'Balance Sheet',cashflow:'Cash Flow',returns:'Returns',workingCap:'Working Capital',valuation:'Valuation',consistency:'Consistency'};
   h+=`<div class="scores-grid">`;
@@ -1239,6 +1676,15 @@ function renderResults(fd){
   h+=arow('Revenue',ann.sales,fmtCr)+arow('Op. Profit',ann.opProfit,fmtCr)+arow('OPM %',ann.opm,fmtPct)+arow('EBIT',ann.ebit,fmtCr)+arow('PAT',ann.pat,fmtCr)+arow('EPS (₹)',ann.eps,v=>v.toFixed(1))+arow('CFO',cf.ops,fmtCr)+arow('FCF',ann.fcf,fmtCr)+arow('Div Payout %',ann.divPayout,v=>v!=null?v.toFixed(0)+'%':'—');
   h+=`</tbody></table></div>`;
 
+  if(qtr.periods && qtr.periods.length){
+    h+=`<div class="sec-label">Quarterly Trend (₹ Cr)</div>`;
+    const qps=qtr.periods.slice(-8),nqc=qps.length;
+    h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Metric</th>${qps.map(y=>`<th>${y}</th>`).join('')}</tr></thead><tbody>`;
+    function qrow(lbl,arr,fmt){const v=arr.slice(-nqc);return`<tr><td>${lbl}</td>${v.map(x=>`<td>${x!=null?fmt(x):'—'}</td>`).join('')}</tr>`;}
+    h+=qrow('Revenue',qtr.sales,fmtCr)+qrow('Op. Profit',qtr.opProfit,fmtCr)+qrow('OPM %',qtr.opm,fmtPct)+qrow('PAT',qtr.pat,fmtCr);
+    h+=`</tbody></table></div>`;
+  }
+
   h+=`<div class="sec-label">Balance Sheet (₹ Cr)</div>`;
   const bsy=bs.years.slice(-6),bsn=bsy.length;
   h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Metric</th>${bsy.map(y=>`<th>${y}</th>`).join('')}</tr></thead><tbody>`;
@@ -1288,18 +1734,21 @@ function renderResults(fd){
     ${grahamRes.applicable?`<div class="val-box"><div class="val-method">Graham Number</div><div class="val-bull">Value: ₹${grahamRes.value}</div><div class="val-base">CMP: ₹${grahamRes.cmp}</div><div class="${grahamRes.marginOfSafety>0?'val-bull':'val-bear'}">MoS: ${sign(grahamRes.marginOfSafety)}${grahamRes.marginOfSafety}%</div><div class="val-note">${grahamRes.verdict}${grahamRes.reducedApplicability?' — reduced relevance for asset-light names in this sector':''}</div></div>`:''}
   </div>`;
 
-  document.getElementById('res-content').innerHTML=h;
-}
+  if(d.sourceNote) h+=`<div style="font-size:.68rem;color:var(--muted);font-style:italic;margin-top:.5rem">Source: ${d.sourceNote}</div>`;
 
-// ─── Build DOCX ───────────────────────────────────────────────────────────────
-async function buildDocx(fd){
+  document.getElementById('s-res-content').innerHTML=h;
+}
+</script>
+<script>
+/* ── Single-stock: Word report builder ──────────────────────────────── */
+async function sBuildDocx(fd){
   const docxLib=window.docx;
   if(!docxLib) throw new Error('docx library failed to load. Check your internet connection and try again.');
   const{Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,AlignmentType,BorderStyle,WidthType,ShadingType,VerticalAlign,LevelFormat}=docxLib;
   const{data:d,scores,ratings,valuation,strategy,positives,negatives,peers,zRes,oRes,duRes,grahamRes,filterRes,sector}=fd;
   const m=d.meta,ann=d.annual,qtr=d.quarterly,bs=d.balanceSheet,cf=d.cashFlow;
   const W=9360,NAV='1A3C6E',LIGHT='EBF0F8',WHITE='FFFFFF',DARK='1C1C1C',GRAY='F5F5F5';
-  const GREEN='1B5E20',RED='C62828',AMBER='E65100',LAMBER='FEF3C7';
+  const GREEN='1B5E20',RED='C62828',AMBER='E65100';
   const b={style:BorderStyle.SINGLE,size:1,color:'CCCCCC'},allB={top:b,bottom:b,left:b,right:b};
 
   function tr2(text,o={}){return new TextRun({text:String(text??""),font:"Arial",size:o.size||19,bold:o.bold,color:o.color||DARK,italics:o.italic});}
@@ -1319,14 +1768,12 @@ async function buildDocx(fd){
   ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:0},children:[tr2("Equity Research Report | "+new Date().toLocaleDateString('en-IN',{year:'numeric',month:'long'}),{size:20,color:"93C5FD"})]}));
   ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:80},children:[tr2(`CMP ₹${m.cmp} | Mkt Cap ₹${fmtCr(m.mktCap)} Cr | P/E ${m.trailingPE||"—"}x | FV ₹${m.faceValue}`,{size:19,color:WHITE})]}));
 
-  const rw=[W/4,W/4,W/4,W/4];
-  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:rw,rows:[new TableRow({children:strategy.map(s=>new TableCell({borders:allB,width:{size:W/4,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:100,right:100},children:[new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.label,{size:16,color:"546E7A"})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.rating,{bold:true,size:22,color:rC(s.rating)})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.target,{size:17})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.upside,{size:16,color:"546E7A"})]})]}))})]})  );
+  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:[W/4,W/4,W/4,W/4],rows:[new TableRow({children:strategy.map(s=>new TableCell({borders:allB,width:{size:W/4,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:80,bottom:80,left:100,right:100},children:[new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.label,{size:16,color:"546E7A"})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.rating,{bold:true,size:22,color:rC(s.rating)})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.target,{size:17})]}),new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.upside,{size:16,color:"546E7A"})]})]}))})]}));
   ch.push(sp2(80));
 
   ch.push(sH("INSTITUTIONAL 3-STAGE QUALITY FILTER"));ch.push(sp2(30));
-  const fsW=[3120,3120,3120];
   const stagesArr=[filterRes.stage1,filterRes.stage2,filterRes.stage3];
-  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:fsW,rows:[new TableRow({children:stagesArr.map(s=>new TableCell({borders:allB,width:{size:3120,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:100,bottom:100,left:100,right:100},children:[
+  ch.push(new Table({width:{size:W,type:WidthType.DXA},columnWidths:[3120,3120,3120],rows:[new TableRow({children:stagesArr.map(s=>new TableCell({borders:allB,width:{size:3120,type:WidthType.DXA},shading:{fill:LIGHT,type:ShadingType.CLEAR},margins:{top:100,bottom:100,left:100,right:100},children:[
     new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:0,after:0},children:[tr2(s.label,{size:16,color:"546E7A"})]}),
     new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:20,after:40},children:[tr2(fsText(s.pass),{bold:true,size:24,color:fsColor(s.pass)})]}),
     ...(s.detail.length?s.detail.map(dt=>new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:10,after:0},children:[tr2(dt,{size:14,color:"666666"})]})):[new Paragraph({alignment:AlignmentType.CENTER,children:[tr2("Insufficient data",{size:14,color:"999999",italic:true})]})]),
@@ -1366,19 +1813,20 @@ async function buildDocx(fd){
     ["Revenue",...ann.sales.slice(sy).map(fmtCr)],["Op. Profit",...ann.opProfit.slice(sy).map(fmtCr)],
     ["OPM %",...ann.opm.slice(sy).map(fmtPct)],["EBIT",...ann.ebit.slice(sy).map(fmtCr)],["PAT",...ann.pat.slice(sy).map(fmtCr)],
     ["EPS (₹)",...ann.eps.slice(sy).map(v=>v!=null?v.toFixed(1):"—")],
-    ["CFO",...cf.ops.slice(sy).map(fmtCr)],
-    ["FCF",...ann.fcf.slice(sy).map(fmtCr)],
+    ["CFO",...cf.ops.slice(sy).map(fmtCr)],["FCF",...ann.fcf.slice(sy).map(fmtCr)],
     ["Div Payout %",...ann.divPayout.slice(sy).map(v=>v!=null?v.toFixed(0)+"%":"—")],
   ],aw));
   ch.push(pp2(`Revenue CAGR 3Y: ${ann.salesCagr3||"—"}% | 5Y: ${ann.salesCagr5||"—"}% | PAT CAGR 3Y: ${ann.patCagr3||"—"}%`,{before:50,after:50}));
 
-  ch.push(sH("QUARTERLY TREND  (₹ Cr)"));ch.push(sp2(30));
-  const qps=qtr.periods.slice(-8),nqc=qps.length;
-  const qw=[1560,...Array(nqc).fill(Math.floor((W-1560)/nqc))];
-  ch.push(tbl2(["Metric",...qps],[
-    ["Revenue",...qtr.sales.slice(-nqc).map(fmtCr)],["Op. Profit",...qtr.opProfit.slice(-nqc).map(fmtCr)],
-    ["OPM %",...qtr.opm.slice(-nqc).map(fmtPct)],["PAT",...qtr.pat.slice(-nqc).map(fmtCr)],
-  ],qw));
+  if(qtr.periods && qtr.periods.length){
+    ch.push(sH("QUARTERLY TREND  (₹ Cr)"));ch.push(sp2(30));
+    const qps=qtr.periods.slice(-8),nqc=qps.length;
+    const qw=[1560,...Array(nqc).fill(Math.floor((W-1560)/nqc))];
+    ch.push(tbl2(["Metric",...qps],[
+      ["Revenue",...qtr.sales.slice(-nqc).map(fmtCr)],["Op. Profit",...qtr.opProfit.slice(-nqc).map(fmtCr)],
+      ["OPM %",...qtr.opm.slice(-nqc).map(fmtPct)],["PAT",...qtr.pat.slice(-nqc).map(fmtCr)],
+    ],qw));
+  }
 
   ch.push(sH("BALANCE SHEET  (₹ Cr)"));ch.push(sp2(30));
   const bsy=bs.years.slice(-6),bsn=bsy.length;
@@ -1441,6 +1889,8 @@ async function buildDocx(fd){
     ...strategy.map((s,i)=>new TableRow({children:[tc2(s.label,{w:1440,bold:true,fill:i%2===1?GRAY:WHITE}),tc2(s.rating,{w:1800,bold:true,color:rC(s.rating),fill:i%2===1?GRAY:WHITE}),tc2(s.target,{w:2160,align:AlignmentType.RIGHT,fill:i%2===1?GRAY:WHITE}),tc2(s.upside,{w:3960,fill:i%2===1?GRAY:WHITE})]}))
   ]}));
 
+  if(d.sourceNote){ ch.push(sp2(40)); ch.push(pp2('Source: '+d.sourceNote,{size:14,italic:true,color:'888888'})); }
+
   ch.push(sp2(80));
   ch.push(pp2("DISCLAIMER: This report is for informational purposes only and does not constitute financial advice. Investing involves risk. Consult a SEBI-registered advisor.",{size:15,italic:true,color:"888888"}));
 
@@ -1452,60 +1902,783 @@ async function buildDocx(fd){
   return await Packer.toBlob(doc2);
 }
 
-function dlDocx(blob,name){
-  if(!blob){showErr('Error: the Word report was not built successfully - please regenerate the report and try downloading again.');return;}
+function sDlDocx(blob,name){
+  if(!blob){showErr('s','Error: the Word report was not built successfully - please regenerate the report and try downloading again.');return;}
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url;a.download=(name||'Company').replace(/[^a-zA-Z0-9]/g,'_')+'_Research_Report.docx';
   a.style.display='none';
-  document.body.appendChild(a);
-  a.click();
+  document.body.appendChild(a); a.click();
   setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
 }
 
-function showErr(msg){const el=document.getElementById('err-box');el.textContent=msg;el.style.display='block';}
-function hideErr(){document.getElementById('err-box').style.display='none';}
-function setStep(n){for(let i=1;i<=3;i++){const el=document.getElementById('step'+i);el.className='step';if(i<n)el.className='step done';if(i===n)el.className='step active';}}
-function doReset(){
-  files={xlsx:null,pdf1:null,pdf2:null,peers:[]};docxBlob=null;logLines=[];
+function sDoReset(){
+  sFiles={xlsx:null,pdf1:null,pdf2:null,peers:[]};
+  sFetchedData=null; sDocxBlob=null; sLogLines=[];
+  sPreParsedXlsx=null; sSectorTouched=false; sFetchedPeers=[];
   ['xlsx','pdf1','pdf2','peers'].forEach(t=>{
-    const fi=document.getElementById('f-'+t);if(fi)fi.value='';
-    document.getElementById('fn-'+t).textContent='';
-    document.getElementById('dz-'+t).classList.remove('ready');
+    const fi=document.getElementById('s-f-'+t); if(fi) fi.value='';
+    document.getElementById('s-fn-'+t).textContent='';
+    document.getElementById('s-dz-'+t).classList.remove('ready');
   });
-  document.getElementById('dz-xlsx').classList.add('mandatory');
-  document.getElementById('gen-btn').disabled=true;
-  document.getElementById('res-card').style.display='none';
-  document.getElementById('prog-card').style.display='none';
-  document.getElementById('upload-card').style.display='block';
-  document.getElementById('pbar').style.width='0%';
-  document.getElementById('plog').innerHTML='';
-  document.getElementById('sector-select').value='general';
-  document.getElementById('qual-mgmt').value='Average';
-  document.getElementById('qual-esg').value='Medium';
-  setStep(1);hideErr();
-  for(let i=1;i<=4;i++){document.getElementById('p'+i+'n').value='';document.getElementById('p'+i+'d').value='';}
+  document.getElementById('s-dz-xlsx').classList.add('mandatory');
+  document.getElementById('s-fetch-ticker').value='';
+  document.getElementById('s-fetch-status').textContent='';
+  document.getElementById('s-peer-fetch-ticker').value='';
+  sRenderPeerChips();
+  sSetSourceTab('xlsx');
+  document.getElementById('s-gen-btn').disabled=true;
+  document.getElementById('s-res-card').style.display='none';
+  document.getElementById('s-prog-card').style.display='none';
+  document.getElementById('s-upload-card').style.display='block';
+  document.getElementById('s-pbar').style.width='0%';
+  document.getElementById('s-plog').innerHTML='';
+  document.getElementById('s-sector-select').value='general';
+  document.getElementById('s-sector-auto-note').style.display='none';
+  document.getElementById('s-qual-mgmt').value='Average';
+  document.getElementById('s-qual-esg').value='Medium';
+  sSetStep(1); hideErr('s');
+  for(let i=1;i<=4;i++){document.getElementById('s-p'+i+'n').value='';document.getElementById('s-p'+i+'d').value='';}
 }
 
 ['xlsx','pdf1','pdf2','peers'].forEach(t=>{
-  const dz=document.getElementById('dz-'+t);
+  const dz=document.getElementById('s-dz-'+t);
   dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
   dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
   dz.addEventListener('drop',e=>{
     e.preventDefault();dz.classList.remove('dragover');
     const f=e.dataTransfer.files[0];
     if(!f)return;
-    const inp=document.getElementById('f-'+t);
+    const inp=document.getElementById('s-f-'+t);
     const dt=new DataTransfer();
-    if(t==='peers') {
-        for(let fi of e.dataTransfer.files) dt.items.add(fi);
-    } else {
-        dt.items.add(f);
-    }
+    if(t==='peers'){ for(let fi of e.dataTransfer.files) dt.items.add(fi); }
+    else { dt.items.add(f); }
     inp.files=dt.files;
-    onFile(t,inp);
+    sOnFile(t,inp);
   });
 });
+</script>
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   PORTFOLIO MODE
+   ════════════════════════════════════════════════════════════════════ */
+let pHoldings=[];
+let pHid=0;
+
+/* Bulk-fetch: accepts comma/space/newline-separated tickers so a whole
+   portfolio can be added in one paste instead of one ticker at a time. */
+async function pFetchHolding(){
+  const raw=document.getElementById('p-fetch-ticker').value.trim();
+  if(!raw){ showErr('p','Enter one or more tickers (comma, space, or newline separated) to fetch.'); return; }
+  hideErr('p');
+  const tickers=[...new Set(raw.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean))]
+    .map(s=>s.toUpperCase().replace(/\s+/g,''));
+  document.getElementById('p-fetch-ticker').value='';
+  const btn=document.getElementById('p-fetch-btn');
+  if(btn) btn.disabled=true;
+  for(let i=0;i<tickers.length;i++){
+    const ticker=tickers[i];
+    if(btn) btn.textContent=tickers.length>1?`Fetching ${i+1}/${tickers.length}…`:'Fetching…';
+    const h={id:++pHid,source:'fetch',name:ticker,quantity:null,priceHistory:null,status:'pending',error:null,debug:null,parsed:null,fd:null};
+    pHoldings.push(h);
+    pRenderHoldingsList();
+    try{
+      const parsed=await fetchAndParseScreener(ticker);
+      h.parsed=parsed;
+      h.name=parsed.meta.companyName;
+      h.status='ok';
+    }catch(e){
+      h.status='err'; h.error=e.message; h.debug=e.debug||null;
+    }
+    pRenderHoldingsList();
+  }
+  if(btn){ btn.disabled=false; btn.textContent='Fetch'; }
+}
+
+document.getElementById('p-f-xlsx-multi').addEventListener('change',async function(){
+  const files=Array.from(this.files||[]);
+  for(const f of files){
+    const h={id:++pHid,source:'upload',name:f.name.replace(/\.xlsx?$/i,''),file:f,quantity:null,priceHistory:null,status:'pending',error:null,parsed:null,fd:null};
+    pHoldings.push(h);
+  }
+  pRenderHoldingsList();
+  try{ await window.__xlsxReady; }catch(e){
+    pHoldings.forEach(h=>{ if(h.status==='pending'){ h.status='err'; h.error='Excel library failed to load — check your connection and reload.'; } });
+    pRenderHoldingsList(); return;
+  }
+  for(const h of pHoldings){
+    if(h.source==='upload' && h.status==='pending'){
+      try{
+        const buf=await h.file.arrayBuffer();
+        h.parsed=parseExcel(new Uint8Array(buf));
+        h.parsed.sourceNote='screener.in Excel export';
+        h.name=h.parsed.meta.companyName;
+        h.status='ok';
+      }catch(e){ h.status='err'; h.error=e.message; }
+    }
+  }
+  pRenderHoldingsList();
+  this.value='';
+});
+
+function pRemoveHolding(id){ pHoldings=pHoldings.filter(h=>h.id!==id); pRenderHoldingsList(); }
+
+function pAttachPriceHistory(id,input){
+  const f=input.files[0]; if(!f) return;
+  const h=pHoldings.find(x=>x.id===id); if(!h) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    const lines=String(reader.result).split(/\r?\n/).filter(l=>l.trim());
+    const start=lines[0].toLowerCase().includes('date')?1:0;
+    const series=[];
+    for(let i=start;i<lines.length;i++){
+      const parts=lines[i].split(',');
+      if(parts.length<2) continue;
+      const date=parts[0].trim(), close=parseFloat(parts[1]);
+      if(date && !isNaN(close)) series.push({date,close});
+    }
+    h.priceHistory=series.length?series:null;
+    if(!series.length) showErr('p','Could not parse "'+f.name+'" as a Date,Close CSV — check the format.');
+    pRenderHoldingsList();
+  };
+  reader.readAsText(f);
+}
+
+function pRenderHoldingsList(){
+  document.getElementById('p-holdings-list').style.display=pHoldings.length?'block':'none';
+  const emptyEl=document.getElementById('p-empty-state');
+  if(emptyEl) emptyEl.style.display=pHoldings.length?'none':'block';
+  const box=document.getElementById('p-holdings-rows');
+  box.innerHTML=pHoldings.map(h=>{
+    const cmp=h.parsed?h.parsed.meta.cmp:null;
+    const posVal=(cmp&&h.quantity)?cmp*h.quantity:null;
+    const statusCls=h.status==='ok'?'ok':(h.status==='err'?'err':'pending');
+    const statusTxt=h.status==='ok'?('✓ '+(h.source==='fetch'?'fetched':'parsed')):(h.status==='err'?'✗ failed':'… working');
+    const debugId='p-dbg-'+h.id;
+    return `<div class="holding-row">
+      <div>${h.name}${h.status==='err'?`<div style="color:var(--red);font-size:.68rem;margin-top:2px">${h.error}${h.debug?` <a href="#" onclick="event.preventDefault();var d=document.getElementById('${debugId}');d.style.display=d.style.display==='none'?'block':'none';" style="color:var(--accent)">details</a><pre id="${debugId}" style="display:none;white-space:pre-wrap;font-size:.63rem;color:var(--muted);background:var(--gray);padding:.4rem;border-radius:5px;margin-top:3px">${JSON.stringify(h.debug,null,2)}</pre>`:''}</div>`:''}</div>
+      <div>${cmp?'₹'+cmp:'—'}</div>
+      <div><input type="number" min="0" value="${h.quantity??''}" placeholder="optional" onchange="pSetQty(${h.id},this.value)"></div>
+      <div>${posVal?'₹'+fmtCr(posVal):'—'}</div>
+      <div>
+        <input type="file" accept=".csv" style="display:none" id="p-px-${h.id}" onchange="pAttachPriceHistory(${h.id},this)">
+        <button class="px-btn ${h.priceHistory?'has':''}" onclick="document.getElementById('p-px-${h.id}').click()">${h.priceHistory?'✓ '+h.priceHistory.length+' pts':'+ attach'}</button>
+      </div>
+      <div><span class="hstatus ${statusCls}">${statusTxt}</span></div>
+      <button class="rm-btn" onclick="pRemoveHolding(${h.id})">✕</button>
+    </div>`;
+  }).join('');
+
+  const withQty=pHoldings.filter(h=>h.quantity);
+  const wb=document.getElementById('p-weight-banner');
+  if(pHoldings.length && withQty.length===0){
+    wb.style.display='block';
+    wb.textContent='No share quantities entered — this will be treated as an equal-weight portfolio. Add quantities above for value-weighted results.';
+  } else if(pHoldings.length && withQty.length<pHoldings.length){
+    wb.style.display='block';
+    wb.textContent=withQty.length+' of '+pHoldings.length+' holdings have a quantity entered. The rest are excluded from value-weighted calculations and flagged separately below.';
+  } else { wb.style.display='none'; }
+
+  document.getElementById('p-gen-btn').disabled=pHoldings.filter(h=>h.status==='ok').length<1;
+}
+function pSetQty(id,val){ const h=pHoldings.find(x=>x.id===id); if(h) h.quantity=val?parseFloat(val):null; pRenderHoldingsList(); }
+
+/* Simple numeric fair-value / EV summary per holding, used only for
+   portfolio-level margin-of-safety & EV aggregation (distinct from the
+   single-stock mode's richer buildVal, which returns bull/base/bear
+   strings for display rather than one clean number to sum). */
+function buildHoldingValuation(m,a,bs){
+  const cmp=safe(m.cmp,1),pe=safe(m.trailingPE,20),mcap=safe(m.mktCap,0),sc3=safe(a.salesCagr3,10);
+  const leps=last(a.eps)||(pe?cmp/pe:0);
+  const gBase=Math.min(sc3*0.75,40);
+  const epsFY2Base=leps?parseFloat((leps*(1+gBase/100)**2).toFixed(1)):null;
+  const peB=Math.round(pe*0.9);
+  const fairValue=epsFY2Base?epsFY2Base*peB:null;
+  const lDepn=last(a.depreciation)||0,lOp=last(a.opProfit)||0,ebitda=lOp+lDepn;
+  const borr=last(bs.borr)||0,cash=last(bs.cash)||0,netDebt=borr-cash;
+  const evMult=ebitda?parseFloat(((mcap+netDebt)/ebitda).toFixed(1)):null;
+  return{fairValue,evMult};
+}
+
+function pRunPerHoldingEngine(h){
+  const {meta:m,annual:a,balanceSheet:bs,cashFlow:cf,quarterly:q}=h.parsed;
+  const sectorLabel=sniffSector(m,a), sectorKey=sectorKeyFromLabel(sectorLabel);
+  const scores=scoreAll(a,bs,cf,m,q);
+  const zRes=calcAltmanZ(sectorKey,a,bs,m);
+  const oRes=calcOhlsonO(a,bs);
+  const duRes=calcDuPont5(a,bs);
+  const grahamRes=calcGrahamNumber(a,bs,m,sectorKey);
+  const valuation=buildHoldingValuation(m,a,bs);
+  const filterRes=calc3StageFilter(zRes,oRes,duRes,grahamRes,a,bs,m,sectorKey);
+  h.fd={scores,zRes,oRes,duRes,grahamRes,valuation,filterRes,sectorLabel,sectorKey};
+}
+
+/* ── Portfolio aggregation ────────────────────────────────────────────── */
+function pComputePortfolio(){
+  const ok=pHoldings.filter(h=>h.status==='ok');
+  const withQty=ok.filter(h=>h.quantity);
+  const equalWeight=withQty.length===0;
+  const included=equalWeight?ok:withQty;
+  const excluded=equalWeight?[]:ok.filter(h=>!h.quantity);
+
+  const values=included.map(h=>equalWeight?1:(h.parsed.meta.cmp*h.quantity));
+  const totalValue=values.reduce((s,v)=>s+v,0);
+  const weights={};
+  included.forEach((h,i)=>{ weights[h.id]=totalValue?values[i]/totalValue:1/included.length; });
+
+  let sumMcap=0,sumPat=0,sumBook=0,sumEV=0,sumEBITDA=0;
+  included.forEach(h=>{
+    const m=h.parsed.meta, a=h.parsed.annual, bs=h.parsed.balanceSheet;
+    const pat=last(a.pat), eq=last(bs.equity);
+    if(m.mktCap!=null&&pat){ sumMcap+=m.mktCap; sumPat+=pat; }
+    if(m.mktCap!=null&&eq){ sumBook+=eq; }
+    const lOp=last(a.opProfit)||0, lDepn=last(a.depreciation)||0, ebitda=lOp+lDepn;
+    const borr=last(bs.borr)||0, cash=last(bs.cash)||0, netDebt=borr-cash;
+    if(m.mktCap!=null&&ebitda){ sumEV+=(m.mktCap+netDebt); sumEBITDA+=ebitda; }
+  });
+  const portfolioPE=sumPat?parseFloat((sumMcap/sumPat).toFixed(1)):null;
+  const portfolioPB=sumBook?parseFloat((sumMcap/sumBook).toFixed(1)):null;
+  const portfolioEVEBITDA=sumEBITDA?parseFloat((sumEV/sumEBITDA).toFixed(1)):null;
+
+  let wROE=0,wROECheck=0,wDE=0,wDECheck=0,wSalesCagr=0,wSalesCagrCheck=0,wPatCagr=0,wPatCagrCheck=0;
+  included.forEach(h=>{
+    const w=weights[h.id], bs=h.parsed.balanceSheet, a=h.parsed.annual;
+    const roe=last(bs.roe); if(roe!=null){ wROE+=roe*w; wROECheck+=w; }
+    const de=last(bs.deRatio); if(de!=null){ wDE+=de*w; wDECheck+=w; }
+    if(a.salesCagr3!=null){ wSalesCagr+=a.salesCagr3*w; wSalesCagrCheck+=w; }
+    if(a.patCagr3!=null){ wPatCagr+=a.patCagr3*w; wPatCagrCheck+=w; }
+  });
+  const weightedROE=wROECheck?parseFloat((wROE/wROECheck).toFixed(1)):null;
+  const weightedDE=wDECheck?parseFloat((wDE/wDECheck).toFixed(2)):null;
+  const weightedSalesCagr=wSalesCagrCheck?parseFloat((wSalesCagr/wSalesCagrCheck).toFixed(1)):null;
+  const weightedPatCagr=wPatCagrCheck?parseFloat((wPatCagr/wPatCagrCheck).toFixed(1)):null;
+
+  let safeV=0,greyV=0,distressV=0,zApplicableV=0,worstZ=null,wOhlsonP=0,wOhlsonCheck=0;
+  included.forEach(h=>{
+    const w=weights[h.id], zRes=h.fd.zRes, oRes=h.fd.oRes;
+    if(zRes.applicable){
+      zApplicableV+=w;
+      if(zRes.zone==='Safe')safeV+=w; else if(zRes.zone==='Grey')greyV+=w; else distressV+=w;
+      if(!worstZ || zRes.value<worstZ.value) worstZ={name:h.name,value:zRes.value,zone:zRes.zone};
+    }
+    if(oRes.applicable){ wOhlsonP+=oRes.probability*w; wOhlsonCheck+=w; }
+  });
+  const distressOverlay={
+    safePct:zApplicableV?parseFloat((safeV/zApplicableV*100).toFixed(0)):null,
+    greyPct:zApplicableV?parseFloat((greyV/zApplicableV*100).toFixed(0)):null,
+    distressPct:zApplicableV?parseFloat((distressV/zApplicableV*100).toFixed(0)):null,
+    worstZ, weightedOhlsonProb:wOhlsonCheck?parseFloat((wOhlsonP/wOhlsonCheck).toFixed(1)):null,
+  };
+
+  const sectorWeight={};
+  included.forEach(h=>{ const sec=h.fd.sectorLabel; sectorWeight[sec]=(sectorWeight[sec]||0)+weights[h.id]; });
+  const hhi=Object.values(sectorWeight).reduce((s,w)=>s+w*w,0);
+  const hhiBand=hhi<0.15?'Well-diversified':(hhi<0.25?'Moderate concentration':'Concentrated');
+
+  let sumFairValue=0,sumCurrentValue=0,fvCount=0;
+  const notFVScreened=[];
+  included.forEach(h=>{
+    const fv=h.fd.valuation.fairValue, qty=equalWeight?null:h.quantity, cmp=h.parsed.meta.cmp;
+    if(fv && qty){ sumFairValue+=fv*qty; sumCurrentValue+=cmp*qty; fvCount++; }
+    else if(!fv) notFVScreened.push(h.name);
+  });
+  const marginOfSafety=(fvCount && sumCurrentValue)?parseFloat(((sumFairValue-sumCurrentValue)/sumCurrentValue*100).toFixed(1)):null;
+
+  const priorityReview=included
+    .filter(h=>h.fd.filterRes.stage1.pass===false)
+    .map((h,i)=>({name:h.name,value:values[included.indexOf(h)]}))
+    .sort((a,b)=>b.value-a.value);
+  const passAllValue=included.filter(h=>h.fd.filterRes.stage1.pass!==false && h.fd.filterRes.stage2.pass!==false && h.fd.filterRes.stage3.pass!==false)
+    .reduce((s,h)=>s+values[included.indexOf(h)],0);
+  const passAllPct=totalValue?parseFloat((passAllValue/totalValue*100).toFixed(0)):null;
+
+  const withPrice=included.filter(h=>h.priceHistory && h.priceHistory.length>2);
+  let correlation={mode:'unavailable',matrix:null,names:[],meta:null};
+  if(withPrice.length>=2){
+    const series=withPrice.map(h=>{
+      const s=[...h.priceHistory].sort((a,b)=>new Date(a.date)-new Date(b.date));
+      const map={}; s.forEach(p=>map[p.date]=p.close);
+      return {name:h.name,map,dates:s.map(p=>p.date)};
+    });
+    const commonDates=series.reduce((acc,s)=>acc.filter(d=>s.map[d]!=null), series[0].dates);
+    if(commonDates.length>5){
+      const returns=series.map(s=>{
+        const closes=commonDates.map(d=>s.map[d]);
+        return closes.slice(1).map((c,i)=>Math.log(c/closes[i]));
+      });
+      function pearson(x,y){
+        const n=x.length, mx=x.reduce((a,b)=>a+b,0)/n, my=y.reduce((a,b)=>a+b,0)/n;
+        let num=0,dx=0,dy=0;
+        for(let i=0;i<n;i++){ num+=(x[i]-mx)*(y[i]-my); dx+=(x[i]-mx)**2; dy+=(y[i]-my)**2; }
+        return (dx&&dy)?num/Math.sqrt(dx*dy):0;
+      }
+      const n=series.length, matrix=[];
+      for(let i=0;i<n;i++){ matrix.push([]); for(let j=0;j<n;j++){ matrix[i].push(i===j?1:parseFloat(pearson(returns[i],returns[j]).toFixed(2))); } }
+      let sum=0,cnt=0;
+      for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(i!==j){sum+=matrix[i][j];cnt++;}
+      correlation={mode:'price',matrix,names:series.map(s=>s.name),meta:{n:commonDates.length,avgPairwise:cnt?parseFloat((sum/cnt).toFixed(2)):null}};
+    }
+  }
+  if(correlation.mode==='unavailable' && included.length>=2){
+    const feats=included.map(h=>{
+      const a=h.parsed.annual, bs=h.parsed.balanceSheet;
+      return {name:h.name, sector:h.fd.sectorLabel, sc3:a.salesCagr3, opm:last(a.opm), de:last(bs.deRatio), roe:last(bs.roe)};
+    });
+    function bucket(v,edges){ if(v==null)return -1; for(let i=0;i<edges.length;i++) if(v<edges[i]) return i; return edges.length; }
+    function vec(f){ return [f.sector, bucket(f.sc3,[10,20,30]), bucket(f.opm,[8,15,25]), bucket(f.de,[0.3,1,2]), bucket(f.roe,[10,18,25])]; }
+    const n=feats.length, matrix=[];
+    for(let i=0;i<n;i++){ matrix.push([]); for(let j=0;j<n;j++){
+      if(i===j){ matrix[i].push(1); continue; }
+      const vi=vec(feats[i]), vj=vec(feats[j]);
+      const matches=vi.filter((x,k)=>x===vj[k]).length;
+      matrix[i].push(parseFloat((matches/vi.length).toFixed(2)));
+    }}
+    correlation={mode:'fundamental-proxy',matrix,names:feats.map(f=>f.name),meta:{n:null,avgPairwise:null}};
+  }
+
+  const HORIZONS=[{label:'1M',months:1},{label:'3M',months:3},{label:'6M',months:6},{label:'1Y',months:12},{label:'3Y',months:36}];
+  function nearestOnOrBefore(sortedSeries,targetDate){
+    let r=null;
+    for(const p of sortedSeries){ if(new Date(p.date)<=targetDate) r=p; else break; }
+    return r;
+  }
+  const pxHoldings=included.filter(h=>h.priceHistory && h.priceHistory.length>1);
+  const perHoldingReturns={};
+  pxHoldings.forEach(h=>{
+    const s=[...h.priceHistory].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const latest=s[s.length-1], latestDate=new Date(latest.date), earliestDate=new Date(s[0].date);
+    const rets={};
+    HORIZONS.forEach(hz=>{
+      const target=new Date(latestDate); target.setMonth(target.getMonth()-hz.months);
+      if(target<earliestDate){ rets[hz.label]=null; return; }
+      const startPt=nearestOnOrBefore(s,target);
+      rets[hz.label]=(startPt&&startPt.close)?parseFloat(((latest.close/startPt.close-1)*100).toFixed(1)):null;
+    });
+    perHoldingReturns[h.id]={rets,series:s,latest};
+  });
+  const portfolioReturns={};
+  HORIZONS.forEach(hz=>{
+    let sumStart=0,sumEnd=0,count=0;
+    pxHoldings.forEach(h=>{
+      const info=perHoldingReturns[h.id], r=info.rets[hz.label];
+      if(r==null) return;
+      const latestDate=new Date(info.latest.date);
+      const target=new Date(latestDate); target.setMonth(target.getMonth()-hz.months);
+      const startPt=nearestOnOrBefore(info.series,target);
+      const qty=equalWeight?1:(h.quantity||0);
+      if(!qty||!startPt) return;
+      sumStart+=startPt.close*qty; sumEnd+=info.latest.close*qty; count++;
+    });
+    portfolioReturns[hz.label]=(count&&sumStart)?parseFloat(((sumEnd/sumStart-1)*100).toFixed(1)):null;
+  });
+  const performance={
+    fundamental:{weightedSalesCagr,weightedPatCagr,weightedROE},
+    price:{available:pxHoldings.length>0,horizons:HORIZONS.map(h=>h.label),perHolding:perHoldingReturns,portfolio:portfolioReturns,coverage:pxHoldings.length+' of '+included.length+' holdings'},
+  };
+
+  const concScore=hhi<0.15?2:(hhi<0.25?1:0);
+  let corrAvg=null;
+  if(correlation.mode==='price') corrAvg=correlation.meta.avgPairwise;
+  else if(correlation.mode==='fundamental-proxy'){
+    const n=correlation.matrix.length; let sum=0,cnt=0;
+    for(let i=0;i<n;i++)for(let j=0;j<n;j++)if(i!==j){sum+=correlation.matrix[i][j];cnt++;}
+    corrAvg=cnt?parseFloat((sum/cnt).toFixed(2)):null;
+  }
+  const corrScore=corrAvg==null?1:(corrAvg<0.3?2:(corrAvg<0.6?1:0));
+  const diversificationTotal=concScore+corrScore;
+  const diversification={
+    verdict:diversificationTotal>=3?'Well Diversified':(diversificationTotal>=2?'Partially Diversified':'Concentrated Risk'),
+    cls:diversificationTotal>=3?'g':(diversificationTotal>=2?'a':'r'),
+    hhiBand,corrAvg,corrMode:correlation.mode,
+  };
+
+  return {
+    included,excluded,equalWeight,totalValue,weights,values,
+    portfolioPE,portfolioPB,portfolioEVEBITDA,weightedROE,weightedDE,weightedSalesCagr,weightedPatCagr,
+    distressOverlay,sectorWeight,hhi,hhiBand,marginOfSafety,notFVScreened,priorityReview,passAllPct,
+    correlation,performance,diversification,
+  };
+}
+</script>
+<script>
+/* ── Portfolio: run + render ─────────────────────────────────────────── */
+async function pRunPortfolioAnalysis(){
+  hideErr('p');
+  const log=document.getElementById('p-prog-log');
+  log.innerHTML='Loading Excel and Word libraries…';
+  try{ await window.__xlsxReady; }catch(e){ showErr('p','Could not load the Excel-reading library — check your connection and reload.'); log.innerHTML=''; return; }
+
+  log.innerHTML='Scoring each holding…';
+  const ok=pHoldings.filter(h=>h.status==='ok');
+  for(const h of ok){
+    try{ pRunPerHoldingEngine(h); }
+    catch(e){ h.status='err'; h.error='Scoring failed: '+e.message; }
+  }
+  pRenderHoldingsList();
+  const stillOk=pHoldings.filter(h=>h.status==='ok'&&h.fd);
+  if(stillOk.length<1){ showErr('p','No holding could be scored. Check the failed rows above.'); log.innerHTML=''; return; }
+
+  log.innerHTML='Aggregating portfolio…';
+  const p=pComputePortfolio();
+  log.innerHTML='';
+  pRenderPortfolioResults(p);
+  document.getElementById('p-res-card').style.display='block';
+  document.getElementById('p-res-card').scrollIntoView({behavior:'smooth'});
+
+  const dlBtn=document.getElementById('p-dl-btn');
+  dlBtn.disabled=false;
+  dlBtn.onclick=async ()=>{
+    dlBtn.disabled=true; dlBtn.textContent='Building…';
+    try{
+      await window.__docxReady;
+      const blob=await pBuildPortfolioDocx(p);
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download='Portfolio_Research_Report.docx'; a.style.display='none';
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
+    }catch(e){
+      showErr('p','Could not build the Word report: '+e.message);
+    }finally{
+      dlBtn.disabled=false; dlBtn.textContent='⬇ Download Word Report (.docx)';
+    }
+  };
+}
+
+function pCorrColor(v,mode){
+  if(mode==='fundamental-proxy'){
+    if(v>0.75) return '#b91c1c'; if(v>0.5) return '#b45309'; return '#15803d';
+  }
+  if(v>0.7) return '#b91c1c'; if(v>0.3) return '#b45309'; if(v>-0.1) return '#64748b'; return '#15803d';
+}
+function pRenderHeatmap(corr,mode){
+  const n=corr.names.length;
+  let h=`<div class="heatmap" style="grid-template-columns:120px repeat(${n},1fr)">`;
+  h+=`<div></div>`;
+  corr.names.forEach(nm=>{ h+=`<div style="font-size:.6rem;text-align:center;padding:2px">${nm.slice(0,10)}</div>`; });
+  corr.matrix.forEach((row,i)=>{
+    h+=`<div style="font-size:.6rem;padding:2px;display:flex;align-items:center">${corr.names[i].slice(0,14)}</div>`;
+    row.forEach(v=>{ h+=`<div class="hcell" style="background:${pCorrColor(v,mode)}">${v.toFixed(2)}</div>`; });
+  });
+  h+=`</div>`;
+  h+=`<div class="corr-caption">${mode==='price'?'High positive correlation is shown as a warning color (less diversification benefit); low/negative is green (diversifying).':'Similarity score 0–1, same color convention — high similarity in amber/red, low similarity in green.'}</div>`;
+  return h;
+}
+
+function pRenderPortfolioResults(p){
+  let h='';
+  h+=`<div class="summary-banner">
+    <div class="sb-item"><div class="l">Total Value</div><div class="v">${p.equalWeight?'—':'₹'+fmtCr(p.totalValue)}</div></div>
+    <div class="sb-item"><div class="l">Holdings</div><div class="v">${p.included.length}${p.excluded.length?' (+'+p.excluded.length+' excl.)':''}</div></div>
+    <div class="sb-item"><div class="l">Portfolio P/E</div><div class="v">${p.portfolioPE??'—'}${p.portfolioPE?'x':''}</div></div>
+    <div class="sb-item"><div class="l">Sector HHI</div><div class="v">${(p.hhi*10000).toFixed(0)}</div></div>
+  </div>`;
+
+  if(p.equalWeight){
+    h+=`<div class="banner">No share quantities were entered — the figures below use equal weighting across all uploaded/fetched holdings. Add quantities for a true value-weighted read.</div>`;
+  } else if(p.excluded.length){
+    h+=`<div class="banner">Excluded from value-weighted calculations (no quantity entered): ${p.excluded.map(h=>h.name).join(', ')}.</div>`;
+  }
+
+  h+=`<div class="sec-label">Portfolio Valuation (correctly aggregated, not weight-averaged)</div>`;
+  h+=`<div class="diag-grid">
+    <div class="diag-box"><div class="diag-name">Portfolio P/E</div><div class="diag-val">${p.portfolioPE??'—'}${p.portfolioPE?'x':''}</div><div style="font-size:.68rem;color:var(--muted)">Σ(Market Cap) / Σ(PAT) — look-through earnings yield, not a weight-average P/E</div></div>
+    <div class="diag-box"><div class="diag-name">Portfolio P/B</div><div class="diag-val">${p.portfolioPB??'—'}${p.portfolioPB?'x':''}</div></div>
+    <div class="diag-box"><div class="diag-name">Portfolio EV/EBITDA</div><div class="diag-val">${p.portfolioEVEBITDA??'—'}${p.portfolioEVEBITDA?'x':''}</div></div>
+    <div class="diag-box"><div class="diag-name">Value-Wtd ROE</div><div class="diag-val">${p.weightedROE??'—'}${p.weightedROE?'%':''}</div><div style="font-size:.68rem;color:var(--muted)">Simple weighted average is correct here — ROE is an intensive ratio, not a ratio-of-sums</div></div>
+    <div class="diag-box"><div class="diag-name">Value-Wtd D/E</div><div class="diag-val">${p.weightedDE??'—'}${p.weightedDE?'x':''}</div></div>
+    <div class="diag-box"><div class="diag-name">Margin of Safety</div><div class="diag-val" style="color:${p.marginOfSafety>0?'var(--green)':'var(--red)'}">${p.marginOfSafety!=null?sign(p.marginOfSafety)+p.marginOfSafety+'%':'—'}</div>${p.notFVScreened.length?`<div style="font-size:.68rem;color:var(--muted)">Not fair-value-screened: ${p.notFVScreened.join(', ')}</div>`:''}</div>
+  </div>`;
+
+  h+=`<div class="sec-label">Distress Overlay (never a single blended Z-score)</div>`;
+  h+=`<div class="diag-grid">
+    <div class="diag-box zone-safe"><div class="diag-name">% Value — Safe Zone</div><div class="diag-val">${p.distressOverlay.safePct??'—'}${p.distressOverlay.safePct!=null?'%':''}</div></div>
+    <div class="diag-box zone-grey"><div class="diag-name">% Value — Grey Zone</div><div class="diag-val">${p.distressOverlay.greyPct??'—'}${p.distressOverlay.greyPct!=null?'%':''}</div></div>
+    <div class="diag-box zone-distress"><div class="diag-name">% Value — Distress Zone</div><div class="diag-val">${p.distressOverlay.distressPct??'—'}${p.distressOverlay.distressPct!=null?'%':''}</div></div>
+    <div class="diag-box"><div class="diag-name">Weighted Ohlson Default Prob.</div><div class="diag-val">${p.distressOverlay.weightedOhlsonProb??'—'}${p.distressOverlay.weightedOhlsonProb!=null?'%':''}</div><div style="font-size:.68rem;color:var(--muted)">This one is legitimately an average — probability is already normalized 0–1</div></div>
+  </div>`;
+  if(p.distressOverlay.worstZ){
+    h+=`<div class="pn-item n-item"><strong>Review this position: ${p.distressOverlay.worstZ.name}</strong> — Z-Score ${p.distressOverlay.worstZ.value} (${p.distressOverlay.worstZ.zone} Zone), the weakest in the portfolio.</div>`;
+  }
+
+  h+=`<div class="sec-label">3-Stage Quality Funnel — Portfolio Rollup</div>`;
+  h+=`<div class="banner info">${p.passAllPct??'—'}% of portfolio value passes all three stages (Survival, Moat, Price).</div>`;
+  if(p.priorityReview.length){
+    h+=`<div style="font-size:.8rem;font-weight:600;margin-bottom:.4rem">Priority review — failed Survival stage, sorted by position value:</div>`;
+    p.priorityReview.forEach(r=>{ h+=`<div class="pn-item n-item"><strong>${r.name}</strong> — position value ₹${fmtCr(r.value)}</div>`; });
+  }
+
+  h+=`<div class="sec-label">Sector Concentration (HHI: ${(p.hhi*10000).toFixed(0)} — ${p.hhiBand})</div>`;
+  h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Sector</th><th>Weight</th></tr></thead><tbody>`;
+  Object.entries(p.sectorWeight).sort((a,b)=>b[1]-a[1]).forEach(([s,w])=>{ h+=`<tr><td>${s}</td><td>${(w*100).toFixed(1)}%</td></tr>`; });
+  h+=`</tbody></table></div>`;
+
+  h+=`<div class="sec-label">Correlation / Diversification Read</div>`;
+  h+=`<div class="banner ${p.diversification.cls==='g'?'info':''}" style="border-color:${p.diversification.cls==='g'?'#15803d':(p.diversification.cls==='a'?'#b45309':'#b91c1c')};color:${p.diversification.cls==='g'?'#14532d':(p.diversification.cls==='a'?'#78350f':'#7f1d1d')};background:${p.diversification.cls==='g'?'var(--lgreen)':(p.diversification.cls==='a'?'var(--lamber)':'var(--lred)')}">
+    <strong>Diversification Read: ${p.diversification.verdict}</strong> — Sector concentration is ${p.diversification.hhiBand.toLowerCase()}${p.diversification.corrAvg!=null?`, and average pairwise ${p.diversification.corrMode==='price'?'price correlation':'business similarity'} is ${p.diversification.corrAvg}`:' (correlation data unavailable — add price history or more holdings for a fuller read)'}.
+  </div>`;
+  if(p.correlation.mode==='price'){
+    h+=`<div class="banner info">True price correlation — based on ${p.correlation.meta.n} overlapping trading days across attached price histories. ${p.correlation.meta.n<60?'This is a short window; treat with caution.':''} Value-weighted average pairwise correlation: ${p.correlation.meta.avgPairwise}.</div>`;
+    h+=pRenderHeatmap(p.correlation,'price');
+  } else if(p.correlation.mode==='fundamental-proxy'){
+    h+=`<div class="banner">Business-similarity proxy, NOT a statistical price correlation — attach a Date,Close price-history CSV per holding above for the real thing. Built from sector, sales-CAGR, OPM, D/E and ROE buckets.</div>`;
+    h+=pRenderHeatmap(p.correlation,'fundamental-proxy');
+  } else {
+    h+=`<div class="banner">Not enough data for either a price correlation or a fundamental-similarity read (need at least 2 scored holdings).</div>`;
+  }
+
+  h+=`<div class="sec-label">Performance</div>`;
+  h+=`<div style="font-size:.8rem;margin-bottom:.5rem"><strong>Fundamental (always available):</strong> value-weighted 3Y Sales CAGR ${p.performance.fundamental.weightedSalesCagr??'—'}${p.performance.fundamental.weightedSalesCagr!=null?'%':''}, PAT CAGR ${p.performance.fundamental.weightedPatCagr??'—'}${p.performance.fundamental.weightedPatCagr!=null?'%':''}, ROE ${p.performance.fundamental.weightedROE??'—'}${p.performance.fundamental.weightedROE!=null?'%':''} — is the business improving, independent of price.</div>`;
+  if(p.performance.price.available){
+    h+=`<div style="font-size:.75rem;color:var(--muted);margin-bottom:.4rem">Price-based trailing returns — ${p.performance.price.coverage} have attached price history. Portfolio return uses the weight at the START of each period (price-then × today's quantity); if you've bought or sold shares during the period, actual historical weights would differ.</div>`;
+    h+=`<div class="dtable-wrap"><table class="dtable"><thead><tr><th>Holding</th>${p.performance.price.horizons.map(h2=>`<th>${h2}</th>`).join('')}</tr></thead><tbody>`;
+    Object.entries(p.performance.price.perHolding).forEach(([id,info])=>{
+      const hd=p.included.find(x=>x.id==id);
+      h+=`<tr><td>${hd?hd.name:id}</td>${p.performance.price.horizons.map(h2=>`<td>${info.rets[h2]!=null?sign(info.rets[h2])+info.rets[h2]+'%':'—'}</td>`).join('')}</tr>`;
+    });
+    h+=`<tr style="font-weight:600;background:var(--light)"><td>Portfolio</td>${p.performance.price.horizons.map(h2=>`<td>${p.performance.price.portfolio[h2]!=null?sign(p.performance.price.portfolio[h2])+p.performance.price.portfolio[h2]+'%':'—'}</td>`).join('')}</tr>`;
+    h+=`</tbody></table></div>`;
+  } else {
+    h+=`<div class="banner">No price history attached to any holding — attach a Date,Close CSV per holding above to see trailing 1M/3M/6M/1Y/3Y returns here.</div>`;
+  }
+
+  h+=`<div class="sec-label">Per-Holding Detail</div>`;
+  p.included.forEach((hd)=>{
+    const fd=hd.fd, z=fd.zRes, o=fd.oRes, w=(p.weights[hd.id]*100).toFixed(1);
+    const snames={growth:'Growth',margins:'Margins',balanceSheet:'Balance Sheet',cashflow:'Cash Flow',returns:'Returns',workingCap:'Working Cap',valuation:'Valuation',consistency:'Consistency'};
+    h+=`<div class="hcard">
+      <div class="hcard-head" onclick="this.nextElementSibling.classList.toggle('open')">
+        <div><span class="nm">${hd.name}</span> <span class="meta">· ${w}% of portfolio · ${hd.source==='fetch'?'fetched':'uploaded'} · sector: ${fd.sectorLabel}</span></div>
+        <div class="badge ${fd.filterRes.stage1.pass===false?'badge-r':(fd.filterRes.stage1.pass===true?'badge-g':'badge-a')}">${fd.filterRes.stage1.pass===false?'Survival: FAIL':(fd.filterRes.stage1.pass===true?'Survival: PASS':'Survival: N/A')}</div>
+      </div>
+      <div class="hcard-body">
+        <div class="scores-grid">${Object.entries(fd.scores).map(([k,v])=>`<div class="score-box"><div class="score-name">${snames[k]||k}</div><div class="score-val" style="color:${scoreColor(v)}">${v}/10</div></div>`).join('')}</div>
+        <div style="font-size:.78rem;color:var(--muted)">${z.applicable?z.model+': '+z.value+' ('+z.zone+' Zone)':'Z-Score: N/A — '+(z.note||'')} &nbsp;|&nbsp; ${o.applicable?'Ohlson default prob: '+o.probability+'%':'Ohlson: N/A'}</div>
+        ${hd.parsed.sourceNote?`<div style="font-size:.68rem;color:var(--muted);margin-top:.4rem;font-style:italic">Source: ${hd.parsed.sourceNote}</div>`:''}
+      </div>
+    </div>`;
+  });
+
+  document.getElementById('p-res-content').innerHTML=h;
+}
+</script>
+<script>
+/* ── Portfolio: Word report builder ─────────────────────────────────── */
+async function pBuildPortfolioDocx(p){
+  const docxLib=window.docx;
+  if(!docxLib) throw new Error('docx library failed to load — check your connection and try again.');
+  const{Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,AlignmentType,BorderStyle,WidthType,ShadingType,VerticalAlign}=docxLib;
+  const W=9360,NAV='1A3C6E',WHITE='FFFFFF',DARK='1C1C1C',GRAY='F5F5F5';
+  const GREEN='1B5E20',RED='C62828',AMBER='E65100';
+  const b={style:BorderStyle.SINGLE,size:1,color:'CCCCCC'},allB={top:b,bottom:b,left:b,right:b};
+  function tr2(text,o={}){return new TextRun({text:String(text??""),font:"Arial",size:o.size||19,bold:o.bold,color:o.color||DARK,italics:o.italic});}
+  function pp2(t,o={}){const runs=typeof t==="string"?[tr2(t,o)]:t;return new Paragraph({children:runs,alignment:o.align,spacing:{before:o.before??50,after:o.after??50},shading:o.fill?{fill:o.fill,type:ShadingType.CLEAR}:undefined});}
+  function tc2(text,o={}){const{w=1000,fill=WHITE,bold=false,color=DARK,align=AlignmentType.LEFT,size=17}=o;return new TableCell({borders:allB,width:{size:w,type:WidthType.DXA},shading:{fill,type:ShadingType.CLEAR},margins:{top:55,bottom:55,left:90,right:90},verticalAlign:VerticalAlign.CENTER,children:[new Paragraph({alignment:align,spacing:{before:0,after:0},children:[tr2(text,{bold,color,size})]})]});}
+  const thc2=(t,w)=>tc2(t,{w,fill:NAV,bold:true,color:WHITE,size:17});
+  function tbl2(hds,rows,widths){return new Table({width:{size:W,type:WidthType.DXA},columnWidths:widths,rows:[new TableRow({children:hds.map((h,i)=>thc2(h,widths[i]))}), ...rows.map((row,ri)=>new TableRow({children:row.map((cell,ci)=>tc2(cell,{w:widths[ci],fill:ri%2===1?GRAY:WHITE,bold:ci===0,align:ci===0?AlignmentType.LEFT:AlignmentType.RIGHT}))}))]});}
+  function sH(title){return new Paragraph({children:[tr2(title,{bold:true,size:22,color:WHITE})],shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:200,after:80},indent:{left:160}});}
+  function sp2(n=50){return new Paragraph({children:[tr2("")],spacing:{before:n,after:0}});}
+  function zColor(zone){if(zone==='Safe')return GREEN;if(zone==='Grey')return AMBER;return RED;}
+
+  const ch=[];
+  ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:0},children:[tr2('Portfolio Research Report',{bold:true,size:32,color:WHITE})]}));
+  ch.push(new Paragraph({alignment:AlignmentType.CENTER,shading:{fill:NAV,type:ShadingType.CLEAR},spacing:{before:0,after:80},children:[tr2(new Date().toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'})+' | '+p.included.length+' holdings',{size:19,color:'93C5FD'})]}));
+
+  ch.push(sH('PORTFOLIO SUMMARY'));ch.push(sp2(30));
+  ch.push(tbl2(['Metric','Value'],[
+    ['Total Value',p.equalWeight?'— (equal-weight)':('₹'+fmtCr(p.totalValue)+' Cr')],
+    ['Portfolio P/E (Σ Mkt Cap / Σ PAT)',p.portfolioPE?p.portfolioPE+'x':'—'],
+    ['Portfolio P/B',p.portfolioPB?p.portfolioPB+'x':'—'],
+    ['Portfolio EV/EBITDA',p.portfolioEVEBITDA?p.portfolioEVEBITDA+'x':'—'],
+    ['Value-Weighted ROE',p.weightedROE!=null?p.weightedROE+'%':'—'],
+    ['Value-Weighted D/E',p.weightedDE!=null?p.weightedDE+'x':'—'],
+    ['Margin of Safety (fair value vs current)',p.marginOfSafety!=null?sign(p.marginOfSafety)+p.marginOfSafety+'%':'—'],
+    ['Sector HHI',(p.hhi*10000).toFixed(0)+' — '+p.hhiBand],
+    ['Diversification Read',p.diversification.verdict],
+    ['3-Stage Funnel — % passing all stages',(p.passAllPct??'—')+'%'],
+  ],[5000,4360]));
+
+  ch.push(sH('DISTRESS OVERLAY'));ch.push(sp2(30));
+  ch.push(tbl2(['Zone','% of Portfolio Value'],[
+    ['Safe',(p.distressOverlay.safePct??'—')+'%'],['Grey',(p.distressOverlay.greyPct??'—')+'%'],['Distress',(p.distressOverlay.distressPct??'—')+'%'],
+    ['Weighted Ohlson Default Prob.',(p.distressOverlay.weightedOhlsonProb??'—')+'%'],
+  ],[5000,4360]));
+  if(p.distressOverlay.worstZ){
+    ch.push(pp2('Review this position: '+p.distressOverlay.worstZ.name+' — Z-Score '+p.distressOverlay.worstZ.value+' ('+p.distressOverlay.worstZ.zone+' Zone), the weakest in the portfolio.',{size:17,color:RED,before:60,after:40}));
+  }
+
+  if(p.priorityReview.length){
+    ch.push(sH('PRIORITY REVIEW — FAILED SURVIVAL STAGE'));ch.push(sp2(30));
+    ch.push(tbl2(['Holding','Position Value'],p.priorityReview.map(r=>[r.name,'₹'+fmtCr(r.value)+' Cr']),[5000,4360]));
+  }
+
+  ch.push(sH('SECTOR CONCENTRATION'));ch.push(sp2(30));
+  ch.push(tbl2(['Sector','Weight'],Object.entries(p.sectorWeight).sort((a,b)=>b[1]-a[1]).map(([s,w])=>[s,(w*100).toFixed(1)+'%']),[5000,4360]));
+
+  if(p.correlation.matrix){
+    ch.push(sH('CORRELATION MATRIX — '+(p.correlation.mode==='price'?'PRICE-BASED':'FUNDAMENTAL SIMILARITY PROXY')));ch.push(sp2(30));
+    const n=p.correlation.names.length, cw=Math.floor(W/(n+1));
+    const rows=p.correlation.matrix.map((row,i)=>[p.correlation.names[i],...row.map(v=>v.toFixed(2))]);
+    ch.push(tbl2(['',...p.correlation.names],rows,[cw,...Array(n).fill(cw)]));
+  }
+
+  if(p.performance.price.available){
+    ch.push(sH('TRAILING PRICE RETURNS'));ch.push(sp2(30));
+    const hz=p.performance.price.horizons;
+    const rows=Object.entries(p.performance.price.perHolding).map(([id,info])=>{
+      const hd=p.included.find(x=>x.id==id);
+      return [hd?hd.name:id,...hz.map(h2=>info.rets[h2]!=null?sign(info.rets[h2])+info.rets[h2]+'%':'—')];
+    });
+    rows.push(['Portfolio',...hz.map(h2=>p.performance.price.portfolio[h2]!=null?sign(p.performance.price.portfolio[h2])+p.performance.price.portfolio[h2]+'%':'—')]);
+    ch.push(tbl2(['Holding',...hz],rows,[2500,...Array(hz.length).fill(Math.floor((W-2500)/hz.length))]));
+  }
+
+  ch.push(sH('PER-HOLDING DETAIL'));ch.push(sp2(30));
+  p.included.forEach(hd=>{
+    const fd=hd.fd, z=fd.zRes, o=fd.oRes, w=(p.weights[hd.id]*100).toFixed(1);
+    ch.push(pp2(hd.name+'  ('+w+'% of portfolio, sector: '+fd.sectorLabel+')',{bold:true,size:20,color:NAV,before:120,after:40}));
+    ch.push(tbl2(['Dimension','Score'],Object.entries(fd.scores).map(([k,v])=>[k,v+'/10']),[5000,4360]));
+    ch.push(pp2([
+      tr2(z.applicable?(z.model+': '+z.value+' ('+z.zone+' Zone)  '):'Z-Score: N/A  ',{size:16,color:z.applicable?zColor(z.zone):'888888'}),
+      tr2(o.applicable?('| Ohlson default prob: '+o.probability+'%'):'| Ohlson: N/A',{size:16}),
+    ],{before:20,after:20}));
+    ch.push(pp2('Survival: '+(fd.filterRes.stage1.pass===true?'PASS':(fd.filterRes.stage1.pass===false?'FAIL':'N/A'))+'  |  Moat: '+(fd.filterRes.stage2.pass===true?'PASS':(fd.filterRes.stage2.pass===false?'FAIL':'N/A'))+'  |  Price: '+(fd.filterRes.stage3.pass===true?'PASS':(fd.filterRes.stage3.pass===false?'FAIL':'N/A')),{size:16,before:0,after:20}));
+    if(hd.parsed.sourceNote) ch.push(pp2('Source: '+hd.parsed.sourceNote,{size:14,italic:true,color:'888888',before:0,after:60}));
+  });
+
+  ch.push(sp2(80));
+  ch.push(pp2('DISCLAIMER: This report is for informational purposes only and does not constitute financial advice. Investing involves risk. Consult a SEBI-registered advisor.',{size:15,italic:true,color:'888888'}));
+
+  const doc2=new Document({
+    styles:{default:{document:{run:{font:'Arial',size:19}}}},
+    sections:[{properties:{page:{size:{width:12240,height:15840},margin:{top:800,right:900,bottom:800,left:900}}},children:ch}]
+  });
+  return await Packer.toBlob(doc2);
+}
+
+/* ── Portfolio: in-browser self-test ─────────────────────────────────── */
+function pMakeTestHolding(id,name,{sales,pat,mktCap,eq,borr,cash,opProfit,depn,eps,cmp,sharesCr}){
+  const years=sales.map((_,i)=>'Y'+i);
+  const annual={years,sales,pat,opProfit,opm:sales.map((s,i)=>opProfit[i]!=null?parseFloat((opProfit[i]/s*100).toFixed(1)):null),
+    npm:sales.map((s,i)=>pat[i]!=null?parseFloat((pat[i]/s*100).toFixed(1)):null),
+    eps:sales.map(()=>eps), depreciation:sales.map(()=>depn), interest:sales.map(()=>0),
+    otherIncome:sales.map(()=>0), salesCagr3:null, salesCagr5:null, patCagr3:null,
+    pbt:pat.map(p=>p*1.25), tax:pat.map(p=>p*0.25), ebit:opProfit.map(op=>op-depn), divPayout:sales.map(()=>null), fcf:sales.map(()=>null)};
+  const equityArr=sales.map(()=>eq);
+  const balanceSheet={years,equity:equityArr,borr:sales.map(()=>borr),total:sales.map(()=>eq+borr+1000),cash:sales.map(()=>cash),
+    recv:sales.map(()=>500),inventory:sales.map(()=>0),netBlock:sales.map(()=>0),
+    roe:sales.map((_,i)=>parseFloat((pat[i]/eq*100).toFixed(1))), deRatio:sales.map(()=>parseFloat((borr/eq).toFixed(2))),
+    ddays:sales.map(()=>45), reserves:sales.map(()=>eq-100), otherLiab:sales.map(()=>800),
+    totalLiab:sales.map(()=>borr+800), currentAssets:sales.map(()=>1300), currentLiab:sales.map(()=>800),
+    workingCap:sales.map(()=>500), currentRatio:sales.map(()=>1.6), quickRatio:sales.map(()=>1.4)};
+  const meta={companyName:name,faceValue:10,cmp,mktCap,sharesCr,trailingPE:cmp&&eps?parseFloat((cmp/eps).toFixed(1)):null,trailingPB:mktCap&&eq?parseFloat((mktCap/eq).toFixed(2)):null,trailingPS:null,looksLikeBank:false,advRowsVerified:true};
+  const quarterly={periods:[],sales:[],opProfit:[],opm:[],pat:[],lastQLabel:'',lastQSales:null,lastQPat:null,lastQOpm:null,yoyQSales:null,yoyQPat:null};
+  return {id,source:'upload',name,quantity:null,priceHistory:null,status:'ok',error:null,parsed:{meta,annual,quarterly,balanceSheet,cashFlow:{years:[],ops:sales.map(()=>0),investing:sales.map(()=>0),financing:[]},sourceNote:'synthetic self-test data'},fd:null};
+}
+
+function pRunSelfTest(){
+  const savedHoldings=pHoldings, savedHid=pHid;
+  const out=[]; let pass=0, fail=0;
+  const assertClose=(actual,expected,tol,label)=>{
+    const ok=actual!=null&&Math.abs(actual-expected)<=tol;
+    if(ok){pass++;out.push('  PASS  '+label+'  (got '+actual+', expected ~'+expected+')');}
+    else{fail++;out.push('  FAIL  '+label+'  (got '+actual+', expected ~'+expected+')');}
+  };
+  const assertEqual=(actual,expected,label)=>{
+    const ok=actual===expected;
+    if(ok){pass++;out.push('  PASS  '+label+'  (got '+JSON.stringify(actual)+')');}
+    else{fail++;out.push('  FAIL  '+label+'  (got '+JSON.stringify(actual)+', expected '+JSON.stringify(expected)+')');}
+  };
+
+  try{
+    out.push('=== Test 1: Aggregate P/E correctness (sum-of-caps/sum-of-PAT vs naive weight-average) ===');
+    {
+      const A=pMakeTestHolding(1,'BigLowPE',{sales:[1000,1100,1210,1331],pat:[100,110,121,133.1],mktCap:2000,eq:800,borr:200,cash:100,opProfit:[150,165,181,199],depn:20,eps:13.31,cmp:200,sharesCr:10});
+      const B=pMakeTestHolding(2,'SmallHighPE',{sales:[50,55,60,65],pat:[2,2.2,2.4,2.6],mktCap:500,eq:200,borr:50,cash:20,opProfit:[5,5.5,6,6.5],depn:1,eps:0.26,cmp:500,sharesCr:1});
+      const C=pMakeTestHolding(3,'MidStock',{sales:[300,330,360,396],pat:[30,33,36,39.6],mktCap:600,eq:250,borr:80,cash:40,opProfit:[45,49,53,58],depn:6,eps:3.96,cmp:120,sharesCr:5});
+      pHoldings=[A,B,C]; pHoldings.forEach(h=>{h.quantity=1; pRunPerHoldingEngine(h);});
+      const p=pComputePortfolio();
+      const correctPE=parseFloat(((2000+500+600)/(133.1+2.6+39.6)).toFixed(1));
+      assertClose(p.portfolioPE,correctPE,0.2,'Portfolio P/E matches sum(mktCap)/sum(PAT)');
+    }
+
+    out.push('=== Test 2: Correlation matrix — known hand-computed cases ===');
+    {
+      const dates=['2024-01-01','2024-01-02','2024-01-03','2024-01-04','2024-01-05','2024-01-06','2024-01-07','2024-01-08'];
+      const baseCloses=[100,102,101,105,107,104,110,112];
+      const A=pMakeTestHolding(1,'StockA',{sales:[100,110],pat:[10,11],mktCap:500,eq:200,borr:50,cash:20,opProfit:[15,16],depn:2,eps:1.1,cmp:100,sharesCr:5});
+      const B=pMakeTestHolding(2,'StockB_identical',{sales:[100,110],pat:[10,11],mktCap:500,eq:200,borr:50,cash:20,opProfit:[15,16],depn:2,eps:1.1,cmp:100,sharesCr:5});
+      const C=pMakeTestHolding(3,'StockC_inverse',{sales:[100,110],pat:[10,11],mktCap:500,eq:200,borr:50,cash:20,opProfit:[15,16],depn:2,eps:1.1,cmp:100,sharesCr:5});
+      A.priceHistory=dates.map((d,i)=>({date:d,close:baseCloses[i]}));
+      B.priceHistory=dates.map((d,i)=>({date:d,close:baseCloses[i]}));
+      const inverseCloses=baseCloses.map(c=>200-c);
+      C.priceHistory=dates.map((d,i)=>({date:d,close:inverseCloses[i]}));
+      pHoldings=[A,B,C]; pHoldings.forEach(h=>{h.quantity=1; pRunPerHoldingEngine(h);});
+      const p=pComputePortfolio();
+      const iA=p.correlation.names.indexOf('StockA'), iB=p.correlation.names.indexOf('StockB_identical'), iC=p.correlation.names.indexOf('StockC_inverse');
+      assertEqual(p.correlation.mode,'price','Correlation mode is price');
+      assertClose(p.correlation.matrix[iA][iB],1.00,0.02,'Identical return series -> rho ~ +1.00');
+      assertClose(p.correlation.matrix[iA][iC],-1.00,0.02,'Inverse return series -> rho ~ -1.00');
+    }
+
+    out.push('=== Test 3: HHI bands ===');
+    {
+      const A=pMakeTestHolding(1,'ConcOnly',{sales:[100,110],pat:[10,11],mktCap:500,eq:200,borr:50,cash:20,opProfit:[15,16],depn:2,eps:1.1,cmp:100,sharesCr:5});
+      pHoldings=[A]; pHoldings.forEach(h=>{h.quantity=1; pRunPerHoldingEngine(h);});
+      let p=pComputePortfolio();
+      assertClose(p.hhi*10000,10000,50,'Single holding -> HHI = 10,000');
+      assertEqual(p.hhiBand,'Concentrated','Single holding -> band = Concentrated');
+
+      const names=['Div1 pharma','Div2 power','Div3 steel','Div4 tech','Div5 finance bank'];
+      const divHoldings=names.map((nm,i)=>pMakeTestHolding(i+10,nm,{sales:[100,110],pat:[10,11],mktCap:500,eq:200,borr:50,cash:20,opProfit:[15,16],depn:2,eps:1.1,cmp:100,sharesCr:5}));
+      pHoldings=divHoldings; pHoldings.forEach(h=>{h.quantity=1; pRunPerHoldingEngine(h);});
+      p=pComputePortfolio();
+      assertEqual(Object.keys(p.sectorWeight).length,5,'5 holdings sniffed into 5 distinct sectors');
+      assertClose(p.hhi*10000,2000,50,'5 equal-weight distinct sectors -> HHI = 2,000');
+      assertEqual(p.hhiBand,'Moderate concentration','HHI=2,000 -> band = Moderate concentration (spec: <1,500 well-diversified, 1,500–2,500 moderate, >2,500 concentrated)');
+    }
+
+    out.push('=== Test 4: Graceful degradation ===');
+    {
+      const A=pMakeTestHolding(1,'DegA',{sales:[100,110],pat:[10,11],mktCap:500,eq:200,borr:50,cash:20,opProfit:[15,16],depn:2,eps:1.1,cmp:100,sharesCr:5});
+      const B=pMakeTestHolding(2,'DegB',{sales:[200,220],pat:[20,22],mktCap:900,eq:400,borr:100,cash:40,opProfit:[30,33],depn:4,eps:2.2,cmp:180,sharesCr:5});
+      pHoldings=[A,B]; pHoldings.forEach(h=>pRunPerHoldingEngine(h));
+      let p=pComputePortfolio();
+      assertEqual(p.equalWeight,true,'(a) Zero quantities -> equal-weight fallback engages');
+
+      A.quantity=10; B.quantity=null;
+      p=pComputePortfolio();
+      assertEqual(p.excluded.length,1,'(b) Holding with no quantity is excluded from value-weighting');
+
+      A.quantity=10; B.quantity=8;
+      p=pComputePortfolio();
+      assertEqual(p.correlation.mode,'fundamental-proxy','(c) No price history -> falls back to fundamental-similarity proxy');
+
+      const C=pMakeTestHolding(3,'Malformed',{sales:[null,null],pat:[null,null],mktCap:null,eq:null,borr:0,cash:0,opProfit:[null,null],depn:0,eps:null,cmp:null,sharesCr:null});
+      pHoldings=[A,B,C];
+      pHoldings.forEach(h=>{ try{ pRunPerHoldingEngine(h); }catch(e){ h.status='err'; h.error=e.message; } });
+      let crashed=false;
+      try{ pComputePortfolio(); }catch(e){ crashed=true; }
+      assertEqual(crashed,false,'(d) One malformed holding does not crash portfolio aggregation');
+    }
+
+    out.push('=== Test 5: Required functions are present in this loaded page ===');
+    ['pComputePortfolio','pRunPerHoldingEngine','sniffSector','calcAltmanZ','calcOhlsonO','calcDuPont5','pBuildPortfolioDocx','parseExcel','scoreAll'].forEach(fn=>{
+      assertEqual(typeof window[fn]==='function'||typeof globalThis[fn]==='function',true,fn+'() is defined');
+    });
+  }catch(e){
+    fail++; out.push('  ERROR during self-test: '+e.message);
+  }
+
+  pHoldings=savedHoldings; pHid=savedHid;
+  pRenderHoldingsList();
+
+  out.push('');
+  out.push('=== RESULT: '+pass+' passed, '+fail+' failed ===');
+  document.getElementById('p-selftest-output').textContent=out.join('\n');
+  document.getElementById('p-selftest-card').style.display='block';
+  document.getElementById('p-selftest-card').scrollIntoView({behavior:'smooth'});
+}
 </script>
 </body>
 </html>
